@@ -158,28 +158,51 @@ def extract_post_info(image_path, gemini_model):
 def parse_table(text):
     """
     Geminiからのテキスト結果をパースして辞書形式で返す。
+    Geminiの出力形式のばらつきに対応するため、より堅牢なパース処理を行う。
     """
     if not text:
         return None
-    lines = [l for l in text.splitlines() if "|" in l]
-    if len(lines) < 2:
+
+    lines = text.splitlines()
+    
+    # ヘッダー行とデータ行を特定
+    header_line = None
+    data_line = None
+    
+    for line in lines:
+        if "|" in line:
+            # Markdownの区切り行をスキップ
+            if all(c.strip().startswith(":") or set(c.strip()) <= set("-:") for c in line.split("|")[1:-1]):
+                continue
+            
+            if header_line is None:
+                header_line = line
+            elif data_line is None:
+                data_line = line
+                break # 最初のデータ行を見つけたら終了
+
+    if header_line is None or data_line is None:
+        st.warning("Geminiの出力から有効なヘッダー行とデータ行を特定できませんでした。")
         return None
-    data_lines = []
-    for l in lines:
-        cells = [c.strip() for c in l.split("|")[1:-1]]
-        # Markdownの区切り行をスキップ
-        if all(cell.startswith(":") or set(cell) <= set("-:") for cell in cells):
-            continue
-        data_lines.append(l)
-    if len(data_lines) < 2:
-        return None
-    headers_row = [h.strip() for h in data_lines[0].split("|")[1:-1]]
-    values_row = [v.strip() for v in data_lines[1].split("|")[1:-1]]
-    # ヘッダーと値の数が一致しない場合はNoneを返す
-    if len(headers_row) != len(values_row):
-        st.warning("Geminiの出力形式が予期せぬものでした。")
-        return None
-    return dict(zip(headers_row, values_row))
+
+    headers_raw = [h.strip() for h in header_line.split("|")[1:-1]]
+    values_raw = [v.strip() for v in data_line.split("|")[1:-1]]
+
+    # ヘッダーと値の数を比較し、調整
+    info = {}
+    num_headers = len(headers_raw)
+    num_values = len(values_raw)
+
+    for i in range(num_headers):
+        header = headers_raw[i]
+        value = values_raw[i] if i < num_values else "" # 値が足りない場合は空文字列で埋める
+        info[header] = value
+    
+    # もし値の数がヘッダーより多い場合、余分な値は無視する
+    if num_values > num_headers:
+        st.warning(f"Geminiの出力に予期せぬ追加の列が含まれていました。ヘッダー数: {num_headers}, 値の数: {num_values}")
+
+    return info
 
 def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
     """
@@ -439,7 +462,8 @@ if email and uploaded_files: # uploaded_filesが空リストでないことを�
                     try:
                         target_worksheet.append_row(row_data, value_input_option='USER_ENTERED')
                         st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{tab_name}' タブに追記しました！ ({i+1}/{total_files}枚目)")
-                        st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
+                        # URL表示をここから削除
+                        # st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
                     except Exception as e:
                         st.error(f"スプレッドシートへの追記中にエラーが発生しました: {e} ({i+1}/{total_files}枚目)")
                 else:
@@ -454,6 +478,9 @@ if email and uploaded_files: # uploaded_filesが空リストでないことを�
         
         progress_bar.empty() # プログレスバーを非表示にする
         st.success("すべての画像の処理が完了しました！")
+        # 全ての処理が完了した後にスプレッドシートのURLを表示
+        if user_spreadsheet: # user_spreadsheetがNoneでないことを確認
+            st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
 
     except Exception as outer_e: # 全体の処理で発生したエラーをキャッチ
         st.error(f"全体の処理中に予期せぬエラーが発生しました: {outer_e}")
