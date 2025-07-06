@@ -122,8 +122,8 @@ def upload_image_to_drive(image_path, drive_service):
         file = drive_service.CreateFile({'title': file_name})
         file.SetContentFile(image_path)
         file.Upload()
-        # 誰でも閲覧できるように権限を設定 (今回は個別のメールアドレスに編集権限を付与するため、これは不要になる)
-        # file.InsertPermission({'type': 'anyone', 'value': 'anyone', 'role': 'reader'})
+        # 誰でも閲覧できるように権限を設定 (修正点: コメントアウトを解除し、公開設定を有効化)
+        file.InsertPermission({'type': 'anyone', 'value': 'anyone', 'role': 'reader'})
         # st.write(f"画像 '{file_name}' をGoogle Driveにアップロードしました。") # 処理メッセージを削除
         return f"https://drive.google.com/uc?id={file['id']}"
     except Exception as e:
@@ -433,7 +433,9 @@ if email and uploaded_files: # uploaded_filesが空リストでないことを�
                     st.error(f"Geminiでの情報抽出に失敗しました。({i+1}/{total_files}枚目)")
                     continue # 次のファイルへ
 
-                st.text_area(f"Gemini抽出結果 ({i+1}/{total_files}枚目)", result_text, height=200) # ユーザーが結果を確認できるよう残す
+                # 修正点: Gemini抽出結果のデバッグ表示を追加
+                st.text_area(f"Gemini抽出結果 ({i+1}/{total_files}枚目)", result_text, height=200) 
+                st.json(parse_table(result_text)) # 抽出されたinfo辞書をJSON形式で表示
 
                 info = parse_table(result_text)
                 
