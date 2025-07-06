@@ -48,16 +48,18 @@ headers = ["画像", "投稿内容", "発信者名", "アカウントID", "投�
 def authenticate_gspread():
     """gspreadを認証し、認証オブジェクトをキャッシュする"""
     try:
-        # credentials.jsonはコードと同じディレクトリに配置してください
-        creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+        google_credentials = st.secrets["GOOGLE_CREDENTIALS"]
+        if isinstance(google_credentials, str):
+            cred_dict = json.loads(google_credentials)
+        else:
+            cred_dict = google_credentials
+        creds = Credentials.from_service_account_info(cred_dict, scopes=SCOPES)
         gc = gspread.authorize(creds)
         st.success("Google Sheets認証に成功しました。")
         return gc
     except Exception as e:
-        st.error(f"Google Sheets認証に失敗しました。credentials.jsonを確認してください: {e}")
-        st.stop() # 認証失敗時は処理を停止
-
-gc = authenticate_gspread()
+        st.error(f"Google Sheets認証に失敗しました。認証情報を確認してください: {e}")
+        st.stop()
 
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
