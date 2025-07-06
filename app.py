@@ -75,7 +75,7 @@ def authenticate_pydrive():
         if isinstance(google_credentials_json_data, str):
             cred_dict = json.loads(google_credentials_json_data)
         else:
-            cred_dict = google_credentials_json_data
+            cred_dict = google_credentials_json_data # 既に辞書なのでそのまま使用
 
         # PyDrive2のGoogleAuth設定を直接service_configとして渡す
         pydrive_settings = {
@@ -460,6 +460,4 @@ if email and uploaded_files: # uploaded_filesが空リストでないことを�
 elif uploaded_files and not email: # uploaded_filesが空リストでないことを確認
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
 elif email and not uploaded_files: # uploaded_filesが空リストであることを確認
-    st.info("画像をアップロードしてください。")
-
     st.info("画像をアップロードしてください。")
