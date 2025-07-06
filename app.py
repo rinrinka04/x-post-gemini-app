@@ -33,11 +33,18 @@ creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
 gc = gspread.authorize(creds)
 
 # --- Google Drive認証 ---
-gauth = GoogleAuth()
-gauth.settings['client_config_backend'] = 'service'
-gauth.settings['service_config'] = {
-    'client_json': json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+import json
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+
+# --- Google Drive認証 ---
+pydrive_settings = {
+    "client_config_backend": "service",
+    "service_config": {
+        "client_json": json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+    }
 }
+gauth = GoogleAuth(settings=pydrive_settings)
 gauth.ServiceAuth()
 drive = GoogleDrive(gauth)
 
