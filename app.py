@@ -97,6 +97,7 @@ def authenticate_pydrive():
                 "client_user_email": cred_dict["client_email"]
             }
         })
+        credentials.access_token_expired = False
         gauth.credentials = credentials
         drive = GoogleDrive(gauth)
         # st.success("Google Drive認証に成功しました。")  # 表示不要ならコメントアウト
