@@ -7,9 +7,8 @@ import gspread
 from google.oauth2.service_account import Credentials # gspreadとPyDrive2の認証で使用
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
-from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
 import json # jsonモジュールはここでインポート
-import streamlit as st
+from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound # gspread.exceptionsから明示的にインポート
 
 # --- パスワード認証 ---
 PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
@@ -46,27 +45,46 @@ headers = ["画像", "投稿内容", "発信者名", "アカウントID", "投�
 
 # --- Google Sheets認証 ---
 @st.cache_resource
+def authenticate_gspread():
+    """gspreadを認証し、認証オブジェクトをキャッシュする"""
+    try:
+        # credentials.jsonはコードと同じディレクトリに配置してください
+        creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        # st.success("Google Sheets認証に成功しました。") # この行を削除/コメントアウト
+        return gc
+    except Exception as e:
+        st.error(f"Google Sheets認証に失敗しました。credentials.jsonを確認してください: {e}")
+        st.stop() # 認証失敗時は処理を停止
+
+gc = authenticate_gspread()
+
+# --- Google Drive認証 ---
+@st.cache_resource
 def authenticate_pydrive():
     """PyDrive2をサービスアカウントで認証し、認証オブジェクトをキャッシュする"""
-    import tempfile
-    import os
-    import json
+    old_cwd = os.getcwd() # 現在の作業ディレクトリを保存
+    temp_dir_obj = None # TemporaryDirectoryオブジェクトを初期化
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Streamlit secretsから認証情報を取得
-            google_credentials = st.secrets["GOOGLE_CREDENTIALS"]
-            if isinstance(google_credentials, str):
-                cred_dict = json.loads(google_credentials)
-            else:
-                cred_dict = google_credentials
+        temp_dir_obj = tempfile.TemporaryDirectory()
+        temp_dir = temp_dir_obj.name # 一時ディレクトリのパスを取得
 
-            # client_secrets.jsonを一時ファイルに保存
-            client_secrets_path = os.path.join(temp_dir, "client_secrets.json")
-            with open(client_secrets_path, "w") as f:
-                json.dump(cred_dict, f)
+        # Streamlit secretsから認証情報を取得
+        google_credentials = st.secrets["GOOGLE_CREDENTIALS"]
+        
+        # google_credentialsが文字列の場合はJSONとしてパース、辞書の場合はそのまま使用
+        if isinstance(google_credentials, str):
+            cred_dict = json.loads(google_credentials)
+        else:
+            cred_dict = google_credentials # 既に辞書なのでそのまま使用
 
-            # settings.yamlを一時ファイルに保存
-            settings_yaml = f"""
+        # client_secrets.jsonを一時ファイルに保存
+        client_secrets_path = os.path.join(temp_dir, "client_secrets.json")
+        with open(client_secrets_path, "w") as f:
+            json.dump(cred_dict, f)
+
+        # settings.yamlを一時ファイルに保存
+        settings_yaml = f"""
 client_config_backend: file
 client_config_file: client_secrets.json
 save_credentials: False
@@ -78,28 +96,32 @@ oauth_scope:
   - https://www.googleapis.com/auth/drive.scripts
 service_config:
   client_user_email: {cred_dict['client_email']}
-  client_json_file_path: {client_secrets_path}
+  # client_json_file_path: {client_secrets_path} # この行は通常不要
 """
-            settings_path = os.path.join(temp_dir, "settings.yaml")
-            with open(settings_path, "w") as f:
-                f.write(settings_yaml)
+        settings_path = os.path.join(temp_dir, "settings.yaml")
+        with open(settings_path, "w") as f:
+            f.write(settings_yaml)
 
-            # カレントディレクトリを一時ディレクトリに移動
-            old_cwd = os.getcwd()
-            os.chdir(temp_dir)
+        # カレントディレクトリを一時ディレクトリに移動
+        os.chdir(temp_dir)
 
-            from pydrive2.auth import GoogleAuth
-            from pydrive2.drive import GoogleDrive
+        gauth = GoogleAuth(settings_file=settings_path)
+        gauth.ServiceAuth()
+        drive = GoogleDrive(gauth)
 
-            gauth = GoogleAuth(settings_file=settings_path)
-            gauth.ServiceAuth()
-            drive = GoogleDrive(gauth)
-
-            os.chdir(old_cwd)
-            return drive
+        st.success("Google Drive認証に成功しました。")
+        return drive
     except Exception as e:
         st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
         st.stop()
+    finally:
+        # 元のカレントディレクトリに戻す
+        os.chdir(old_cwd)
+        # 一時ディレクトリをクリーンアップ
+        if temp_dir_obj:
+            temp_dir_obj.cleanup()
+
+drive = authenticate_pydrive()
 
 # --- Gemini API ---
 @st.cache_resource
@@ -382,10 +404,6 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
     except Exception as e:
         st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
         return None
-
-gc = authenticate_gspread()
-drive = authenticate_pydrive()
-model = configure_gemini()
 
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
