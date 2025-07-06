@@ -71,17 +71,18 @@ def authenticate_pydrive():
             st.error("Streamlit Secretsに 'GOOGLE_CREDENTIALS' が設定されていません。")
             st.stop()
 
-        # secretsが文字列の場合はJSONとしてパース、既に辞書の場合はそのまま使用
+        # secretsが文字列の場合はJSONとしてパース
+        # 既に辞書の場合は、json.dumps()でJSON文字列に変換してから渡す
         if isinstance(google_credentials_json_data, str):
-            cred_dict = json.loads(google_credentials_json_data)
+            client_json_content = google_credentials_json_data
         else:
-            cred_dict = google_credentials_json_data # 既に辞書なのでそのまま使用
+            client_json_content = json.dumps(google_credentials_json_data) # 辞書をJSON文字列に変換
 
         # PyDrive2のGoogleAuth設定を直接service_configとして渡す
         pydrive_settings = {
             "client_config_backend": "service",
             "service_config": {
-                "client_json": cred_dict # 認証情報を辞書として直接渡す
+                "client_json": client_json_content # JSON文字列として渡す
             }
         }
         
