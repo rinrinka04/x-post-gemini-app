@@ -22,7 +22,6 @@ if not st.session_state["authenticated"]:
         st.session_state["authenticated"] = True
         st.success("認証成功！")
         # 認証成功後、アプリを再実行してUIを表示
-        # st.experimental_rerun() は非推奨になったため、st.rerun() を使用します。
         st.rerun()
     else:
         st.error("パスワードが異なります。")
@@ -63,30 +62,30 @@ gc = authenticate_gspread()
 @st.cache_resource
 def authenticate_pydrive():
     """PyDriveを認証し、認証オブジェクトをキャッシュする"""
+    temp_file_path = None # 一時ファイルのパスを初期化
     try:
         gauth = GoogleAuth()
         
         # Streamlit secretsからGoogle Driveの認証情報を取得
-        # st.secrets["GOOGLE_CREDENTIALS"]が存在しない場合、get()はNoneを返す
         google_credentials_json_data = st.secrets.get("GOOGLE_CREDENTIALS")
 
         if not google_credentials_json_data:
             st.error("Streamlit Secretsに 'GOOGLE_CREDENTIALS' が設定されていません。")
             st.stop()
 
-        # secretsが文字列の場合はJSONとしてパース、既に辞書の場合はそのまま使用
+        # secretsが文字列の場合はJSONとしてパース、既に辞書の場合はJSON文字列に変換
         if isinstance(google_credentials_json_data, str):
-            client_json_content = json.loads(google_credentials_json_data)
-        else: # secrets.tomlで直接辞書として定義されている場合など
             client_json_content = google_credentials_json_data
+        else: # secrets.tomlで直接辞書として定義されている場合など
+            client_json_content = json.dumps(google_credentials_json_data) # DictをJSON文字列に変換
 
-        pydrive_settings = {
-            "client_config_backend": "service",
-            "service_config": {
-                "client_json": client_json_content
-            }
-        }
-        gauth.settings = pydrive_settings
+        # 認証情報を一時ファイルに書き込む
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+            temp_file.write(client_json_content)
+            temp_file_path = temp_file.name # 一時ファイルのパスを保持
+        
+        # GoogleAuthの設定で一時ファイルを指定
+        gauth.settings['client_config_file'] = temp_file_path
         gauth.ServiceAuth()
         drive = GoogleDrive(gauth)
         st.success("Google Drive認証に成功しました。")
@@ -94,6 +93,10 @@ def authenticate_pydrive():
     except Exception as e:
         st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
         st.stop() # 認証失敗時は処理を停止
+    finally:
+        # 一時ファイルを削除 (キャッシュされるため、実際にはアプリの終了時に削除されることが多いですが、念のため)
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
 
 drive = authenticate_pydrive()
 
@@ -333,4 +336,3 @@ elif uploaded_file is not None and not user_name:
     st.warning("画像をアップロードする前に、あなたの名前を入力してください。")
 elif user_name and uploaded_file is None:
     st.info("画像をアップロードしてください。")
-
