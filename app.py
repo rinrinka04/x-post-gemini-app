@@ -1,5 +1,19 @@
 import streamlit as st
 import os
+
+PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    pw = st.text_input("パスワードを入力してください", type="password")
+    if pw == PASSWORD:
+        st.session_state["authenticated"] = True
+        st.success("認証成功！")
+    else:
+        st.stop()
+
 # --- Secretsから認証情報を取得 ---
 GENAI_API_KEY = st.secrets["GENAI_API_KEY"]
 GOOGLE_CREDENTIALS = st.secrets["GOOGLE_CREDENTIALS"]
