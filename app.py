@@ -22,7 +22,8 @@ if not st.session_state["authenticated"]:
         st.session_state["authenticated"] = True
         st.success("認証成功！")
         # 認証成功後、アプリを再実行してUIを表示
-        st.experimental_rerun()
+        # st.experimental_rerun() は非推奨になったため、st.rerun() を使用します。
+        st.rerun()
     else:
         st.error("パスワードが異なります。")
         st.stop() # 認証失敗時は処理を停止
@@ -333,7 +334,3 @@ elif uploaded_file is not None and not user_name:
 elif user_name and uploaded_file is None:
     st.info("画像をアップロードしてください。")
 
-elif uploaded_file is not None and not user_name:
-    st.warning("画像をアップロードする前に、あなたの名前を入力してください。")
-elif user_name and uploaded_file is None:
-    st.info("画像をアップロードしてください。")
