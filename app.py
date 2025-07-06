@@ -63,9 +63,7 @@ gc = authenticate_gspread()
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 import streamlit as st
-import tempfile
 import json
-import os
 from google.oauth2.service_account import Credentials
 
 @st.cache_resource
@@ -87,12 +85,18 @@ def authenticate_pydrive():
             "https://www.googleapis.com/auth/drive.scripts",
         ]
         if isinstance(google_credentials_json_data, str):
-            credentials = Credentials.from_service_account_info(json.loads(google_credentials_json_data), scopes=scopes)
+            cred_dict = json.loads(google_credentials_json_data)
         else:
-            credentials = Credentials.from_service_account_info(google_credentials_json_data, scopes=scopes)
+            cred_dict = google_credentials_json_data
+
+        credentials = Credentials.from_service_account_info(cred_dict, scopes=scopes)
 
         # PyDrive2認証
-        gauth = GoogleAuth()
+        gauth = GoogleAuth(settings={
+            "service_config": {
+                "client_user_email": cred_dict["client_email"]
+            }
+        })
         gauth.credentials = credentials
         drive = GoogleDrive(gauth)
         # st.success("Google Drive認証に成功しました。")  # 表示不要ならコメントアウト
