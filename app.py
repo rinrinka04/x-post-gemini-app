@@ -60,12 +60,8 @@ def authenticate_gspread():
 gc = authenticate_gspread()
 
 # --- Google Drive認証 ---
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-import streamlit as st
-import json
-from google.oauth2.service_account import Credentials
-
+# authenticate_pydrive 関数を定義し、PyDrive2の認証を処理します。
+# @st.cache_resource デコレータにより、アプリの再実行時も認証情報をキャッシュします。
 @st.cache_resource
 def authenticate_pydrive():
     """PyDrive2をサービスアカウントで認証し、認証オブジェクトをキャッシュする"""
@@ -191,28 +187,6 @@ def parse_table(text):
         st.warning("Geminiの出力形式が予期せぬものでした。")
         return None
     return dict(zip(headers_row, values_row))
-
-# 古い get_or_create_user_spreadsheet 関数は削除
-# def get_or_create_user_spreadsheet(gc, email, title_prefix="Xポスト一覧_"):
-#     db_file = "user_sheets.json"
-#     if os.path.exists(db_file):
-#         with open(db_file, "r") as f:
-#             user_sheets = json.load(f)
-#     else:
-#         user_sheets = {}
-
-#     if email in user_sheets:
-#         spreadsheet_id = user_sheets[email]
-#         sh = gc.open_by_key(spreadsheet_id)
-#     else:
-#         sh = gc.create(f"{title_prefix}{email}")
-#         spreadsheet_id = sh.id
-#         user_sheets[email] = spreadsheet_id
-#         with open(db_file, "w") as f:
-#             json.dump(user_sheets, f)
-#         # メールアドレスに編集者権限を付与
-#         sh.share(email, perm_type='user', role='writer')
-#     return sh
 
 def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
     """
@@ -495,5 +469,3 @@ elif uploaded_files and not email: # uploaded_filesが空リストでないこ�
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
 elif email and not uploaded_files: # uploaded_filesが空リストであることを確認
     st.info("画像をアップロードしてください。")
-
-
