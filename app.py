@@ -1,5 +1,16 @@
 import streamlit as st
 import os
+import tempfile
+import google.generativeai as genai
+from PIL import Image
+import gspread
+from google.oauth2.service_account import Credentials
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
+import json # jsonモジュールはここでインポート
+
+# --- パスワード認証 ---
 PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
 
 if "authenticated" not in st.session_state:
@@ -10,16 +21,13 @@ if not st.session_state["authenticated"]:
     if pw == PASSWORD:
         st.session_state["authenticated"] = True
         st.success("認証成功！")
+        # 認証成功後、アプリを再実行してUIを表示
+        st.experimental_rerun()
     else:
-        st.stop()
-import tempfile
-import google.generativeai as genai
-from PIL import Image
-import gspread
-from google.oauth2.service_account import Credentials
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
+        st.error("パスワードが異なります。")
+        st.stop() # 認証失敗時は処理を停止
+
+# 認証成功後の処理（ここからメインアプリのコードが実行される）
 
 # --- 設定 ---
 # Gemini APIキーをここに設定してください
@@ -50,20 +58,43 @@ def authenticate_gspread():
 
 gc = authenticate_gspread()
 
-import json
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-
 # --- Google Drive認証 ---
-pydrive_settings = {
-    "client_config_backend": "service",
-    "service_config": {
-        "client_json": json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-    }
-}
-gauth = GoogleAuth(settings=pydrive_settings)
-gauth.ServiceAuth()
-drive = GoogleDrive(gauth)
+@st.cache_resource
+def authenticate_pydrive():
+    """PyDriveを認証し、認証オブジェクトをキャッシュする"""
+    try:
+        gauth = GoogleAuth()
+        
+        # Streamlit secretsからGoogle Driveの認証情報を取得
+        # st.secrets["GOOGLE_CREDENTIALS"]が存在しない場合、get()はNoneを返す
+        google_credentials_json_data = st.secrets.get("GOOGLE_CREDENTIALS")
+
+        if not google_credentials_json_data:
+            st.error("Streamlit Secretsに 'GOOGLE_CREDENTIALS' が設定されていません。")
+            st.stop()
+
+        # secretsが文字列の場合はJSONとしてパース、既に辞書の場合はそのまま使用
+        if isinstance(google_credentials_json_data, str):
+            client_json_content = json.loads(google_credentials_json_data)
+        else: # secrets.tomlで直接辞書として定義されている場合など
+            client_json_content = google_credentials_json_data
+
+        pydrive_settings = {
+            "client_config_backend": "service",
+            "service_config": {
+                "client_json": client_json_content
+            }
+        }
+        gauth.settings = pydrive_settings
+        gauth.ServiceAuth()
+        drive = GoogleDrive(gauth)
+        st.success("Google Drive認証に成功しました。")
+        return drive
+    except Exception as e:
+        st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
+        st.stop() # 認証失敗時は処理を停止
+
+drive = authenticate_pydrive()
 
 # --- Gemini API ---
 @st.cache_resource
