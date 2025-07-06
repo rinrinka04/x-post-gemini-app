@@ -1,0 +1,6 @@
+streamlit
+gspread
+google-auth
+pydrive2
+pillow
+google-generativeai
