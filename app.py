@@ -9,6 +9,9 @@ from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
 import json # jsonモジュールはここでインポート
+import gspread
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 
 # --- パスワード認証 ---
 PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
@@ -273,24 +276,142 @@ def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
 def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
     """
     指定されたスプレッドシート内で、指定されたタイトル（発信者名）のワークシートを取得または新規作成する。
-    新規作成時にはヘッダーを書き込む。
+    新規作成時にはヘッダーを書き込み、初期設定を適用する。
     """
     try:
         # 既存のワークシートをタイトルで取得
         worksheet = spreadsheet.worksheet(sheet_title)
-        st.write(f"既存のワークシート '{sheet_title}' を使用します。")
+        # st.write(f"既存のワークシート '{sheet_title}' を使用します。") # 処理メッセージを削除
         return worksheet
     except WorksheetNotFound:
         # ワークシートが存在しない場合、新規作成
-        st.write(f"ワークシート '{sheet_title}' を新規作成します。")
+        # st.write(f"ワークシート '{sheet_title}' を新規作成します。") # 処理メッセージを削除
         # add_worksheetのrows/colsは目安。必要に応じて調整。
         worksheet = spreadsheet.add_worksheet(title=sheet_title, rows="1000", cols="20")
         # ヘッダーを書き込む
         worksheet.append_row(headers_list)
+
+        # --- 新規作成されたワークシートへの初期設定適用 ---
+        sheet_id = worksheet._properties['sheetId']
+        requests = []
+
+        # 1. 1列固定 (最初の列を固定)
+        requests.append({
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {
+                        "frozenColumnCount": 1
+                    }
+                },
+                "fields": "gridProperties.frozenColumnCount"
+            }
+        })
+
+        # 2. 全て文字は中央揃え（垂直方向、水平方向両方とも）
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1000, # 十分な範囲を指定
+                    "startColumnIndex": 0,
+                    "endColumnIndex": 20 # 十分な範囲を指定
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE"
+                    }
+                },
+                "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment"
+            }
+        })
+
+        # 3. 行2 280ピクセル (0-indexed: startIndex=1, endIndex=2)
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": 1,
+                    "endIndex": 2
+                },
+                "properties": {
+                    "pixelSize": 280
+                },
+                "fields": "pixelSize"
+            }
+        })
+
+        # 4. 列A 280ピクセル (0-indexed: startIndex=0, endIndex=1)
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 0,
+                    "endIndex": 1
+                },
+                "properties": {
+                    "pixelSize": 280
+                },
+                "fields": "pixelSize"
+            }
+        })
+
+        # 5. 列B テキストを折り返す (0-indexed: startIndex=1, endIndex=2)
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startColumnIndex": 1,
+                    "endColumnIndex": 2
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "wrapStrategy": "WRAP"
+                    }
+                },
+                "fields": "userEnteredFormat.wrapStrategy"
+            }
+        })
+
+        # 6. 列K〜T削除 (0-indexed: K=10, T=19)
+        requests.append({
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 10,
+                    "endIndex": 20 # T列の次まで
+                }
+            }
+        })
+
+        # 7. 列C〜Jの幅はデータに合わせる (0-indexed: C=2, J=9)
+        requests.append({
+            "autoResizeDimensions": {
+                "dimensions": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 2,
+                    "endIndex": 10 # J列の次まで
+                }
+            }
+        })
+        
+        try:
+            spreadsheet.batch_update({"requests": requests})
+            st.success(f"ワークシート '{sheet_title}' の初期設定を適用しました。")
+        except Exception as update_e:
+            st.warning(f"ワークシート '{sheet_title}' の初期設定適用中にエラーが発生しました。手動で設定してください: {update_e}")
+
         return worksheet
     except Exception as e:
         st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
         return None
+
 
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
