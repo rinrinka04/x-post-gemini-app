@@ -46,7 +46,7 @@ headers = ["画像", "投稿内容", "発信者名", "アカウントID", "投�
 
 # --- Google Sheets認証 ---
 @st.cache_resource
-def authenticate_gspread():
+def authenticate_pydrive():
     """PyDrive2をサービスアカウントで認証し、認証オブジェクトをキャッシュする"""
     import tempfile
     import os
@@ -78,6 +78,7 @@ oauth_scope:
   - https://www.googleapis.com/auth/drive.scripts
 service_config:
   client_user_email: {cred_dict['client_email']}
+  client_json_file_path: {client_secrets_path}
 """
         settings_path = os.path.join(temp_dir.name, "settings.yaml")
         with open(settings_path, "w") as f:
