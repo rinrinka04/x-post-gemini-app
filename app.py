@@ -47,7 +47,7 @@ gauth.ServiceAuth()
 drive = GoogleDrive(gauth)
 
 # --- スプレッドシート ---
-sh = gc.open_by_key(1ZXxNhnvjix50IDimcdtPvOX8SZymJcDbQF_P3C7OqLw)
+sh = gc.open_by_key("1ZXxNhnvjix50IDimcdtPvOX8SZymJcDbQF_P3C7OqLw")
 
 headers = ["画像", "投稿内容", "発信者", "投稿時間", "いいね数", "RT数", "コメント数", "インプレッション", "ブックマーク数"]
 
