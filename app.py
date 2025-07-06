@@ -132,16 +132,18 @@ def get_or_create_user_spreadsheet(gc, email, title_prefix="Xポスト一覧_"):
 def extract_post_info(image_path, gemini_model):
     """
     Gemini APIを使用して画像から投稿情報を抽出する。
+    プロンプトを修正し、「アカウントID」も抽出するように変更。
     """
     try:
         image_data = Image.open(image_path)
         prompt = """
         この画像はX（旧Twitter）のポストです。
-        投稿内容、発信者、投稿時間、いいね数、RT数、コメント数、インプレッション、ブックマーク数を日本語で表にしてください。
+        投稿内容、発信者名、アカウントID、投稿時間、いいね数、RT数、コメント数、インプレッション、ブックマーク数を日本語で表にしてください。
+        発信者名とアカウントIDは必ず分けて出力してください。
         投稿時間は「2025年7月3日　午後11:41」のように、日付→時刻の順で出力してください。
         例:
-        | 投稿内容 | 発信者 | 投稿時間 | いいね数 | RT数 | コメント数 | インプレッション | ブックマーク数 |
-        | 例の投稿内容 | 例の発信者 | 2025年7月3日　午後11:41 | 100 | 10 | 5 | 1万 | 20 |
+        | 投稿内容 | 発信者名 | アカウントID | 投稿時間 | いいね数 | RT数 | コメント数 | インプレッション | ブックマーク数 |
+        | 例の投稿内容 | なまいきくん | 1namaiki | 2025年7月3日 午後11:41 | 100 | 10 | 5 | 1万 | 20 |
         """
         response = gemini_model.generate_content([prompt, image_data])
         return response.text
@@ -235,6 +237,38 @@ def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
         st.error(f"スプレッドシートの取得または作成中にエラーが発生しました: {e}")
         return None
 
+def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
+    """
+    ユーザーのメールアドレスに対応するスプレッドシートを取得または新規作成する。
+    新規作成時には、指定されたメールアドレスに編集権限を付与する。
+    """
+    spreadsheet_title = f"Xポスト自動化_{user_email}"
+    spreadsheet = None # 初期化
+    try:
+        # 既存のスプレッドシートをタイトルで検索
+        spreadsheet = gspread_client.open(spreadsheet_title)
+        st.write(f"既存のスプレッドシート '{spreadsheet_title}' を使用します。")
+    except SpreadsheetNotFound:
+        # スプレッドシートが存在しない場合、新規作成
+        st.write(f"スプレッドシート '{spreadsheet_title}' を新規作成します。")
+        spreadsheet = gspread_client.create(spreadsheet_title)
+        st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成しました。")
+    except Exception as e:
+        st.error(f"スプレッドシートの取得または作成中にエラーが発生しました: {e}")
+        return None
+
+    # スプレッドシートが取得または作成された場合のみ共有設定を試みる
+    if spreadsheet:
+        try:
+            # 指定されたメールアドレスに編集権限を付与
+            # 既に権限がある場合は更新される
+            spreadsheet.share(user_email, perm_type='user', role='writer')
+            st.success(f"スプレッドシート '{spreadsheet_title}' に {user_email} の編集権限を設定しました。")
+        except Exception as share_e:
+            st.warning(f"スプレッドシートの共有設定中にエラーが発生しました。手動で共有設定を行ってください: {share_e}")
+    
+    return spreadsheet
+
 def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
     """
     指定されたスプレッドシート内で、指定されたタイトル（発信者名）のワークシートを取得または新規作成する。
@@ -320,19 +354,23 @@ if email and uploaded_file is not None:
         st.write(f"parse_tableの結果: {info}")
         
         if info:
-            # 発信者名を取得
-            poster_name = info.get("発信者")
-            if not poster_name:
-                st.error("発信者情報を抽出できませんでした。Geminiの出力形式を確認してください。")
-                # エラー発生時は後続処理を行わない
+            # 発信者名とアカウントIDを取得
+            author_name = info.get("発信者名")
+            account_id = info.get("アカウントID")
+
+            if not author_name:
+                st.error("発信者名情報を抽出できませんでした。Geminiの出力形式を確認してください。")
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
                     st.write("一時ファイル削除完了")
                 st.stop()
 
+            # タブ名を「発信者名（@アカウントID）」の形式で生成
+            tab_name = f"{author_name}（@{account_id}）" if account_id else author_name
+            
             # 発信者ごとのワークシートを取得または作成
-            st.write(f"'{poster_name}'さんのタブを取得/作成します。")
-            target_worksheet = get_or_create_worksheet(user_spreadsheet, poster_name, headers)
+            st.write(f"'{tab_name}'さんのタブを取得/作成します。")
+            target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
             if target_worksheet is None:
                 st.error("ワークシートの準備に失敗しました。")
                 if tmp_path and os.path.exists(tmp_path):
@@ -341,10 +379,13 @@ if email and uploaded_file is not None:
                 st.stop()
 
             # データを追記
-            row_data = [image_formula] + [info.get(h, "") for h in headers[1:]]
+            # headersの順番に合わせてデータを準備
+            row_data = [image_formula, info.get("投稿内容", ""), info.get("発信者名", ""), info.get("アカウントID", ""), 
+                        info.get("投稿時間", ""), info.get("いいね数", ""), info.get("RT数", ""), 
+                        info.get("コメント数", ""), info.get("インプレッション", ""), info.get("ブックマーク数", "")]
             try:
                 target_worksheet.append_row(row_data, value_input_option='USER_ENTERED')
-                st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{poster_name}' タブに追記しました！")
+                st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{tab_name}' タブに追記しました！")
                 st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
             except Exception as e:
                 st.error(f"スプレッドシートへの追記中にエラーが発生しました: {e}")
@@ -361,7 +402,7 @@ if email and uploaded_file is not None:
         else:
             st.write("一時ファイルは作成されなかったか、既に削除されています。")
 
-elif uploaded_file is not None and not email: # user_name を email に変更
+elif uploaded_file is not None and not email:
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
-elif email and uploaded_file is None: # user_name を email に変更
+elif email and uploaded_file is None:
     st.info("画像をアップロードしてください。")
