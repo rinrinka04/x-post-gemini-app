@@ -9,9 +9,6 @@ from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
 import json # jsonモジュールはここでインポート
-import gspread
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
 
 # --- パスワード認証 ---
 PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
@@ -54,6 +51,7 @@ def authenticate_gspread():
         # credentials.jsonはコードと同じディレクトリに配置してください
         creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
         gc = gspread.authorize(creds)
+        # st.success("Google Sheets認証に成功しました。") # この行を削除/コメントアウト
         return gc
     except Exception as e:
         st.error(f"Google Sheets認証に失敗しました。credentials.jsonを確認してください: {e}")
@@ -61,19 +59,47 @@ def authenticate_gspread():
 
 gc = authenticate_gspread()
 
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-
 # --- Google Drive認証 ---
-pydrive_settings = {
-    "client_config_backend": "service",
-    "service_config": {
-        "client_json": st.secrets["GOOGLE_CREDENTIALS"]
-    }
-}
-gauth = GoogleAuth(settings=pydrive_settings)
-gauth.ServiceAuth()
-drive = GoogleDrive(gauth)
+@st.cache_resource
+def authenticate_pydrive():
+    """PyDriveを認証し、認証オブジェクトをキャッシュする"""
+    temp_file_path = None # 一時ファイルのパスを初期化
+    try:
+        gauth = GoogleAuth()
+        
+        # Streamlit secretsからGoogle Driveの認証情報を取得
+        google_credentials_json_data = st.secrets.get("GOOGLE_CREDENTIALS")
+
+        if not google_credentials_json_data:
+            st.error("Streamlit Secretsに 'GOOGLE_CREDENTIALS' が設定されていません。")
+            st.stop()
+
+        # secretsが文字列の場合はJSONとしてパース、既に辞書の場合はJSON文字列に変換
+        if isinstance(google_credentials_json_data, str):
+            client_json_content = google_credentials_json_data
+        else: # secrets.tomlで直接辞書として定義されている場合など
+            client_json_content = json.dumps(google_credentials_json_data) # DictをJSON文字列に変換
+
+        # 認証情報を一時ファイルに書き込む
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
+            temp_file.write(client_json_content)
+            temp_file_path = temp_file.name # 一時ファイルのパスを保持
+        
+        # GoogleAuthの設定で一時ファイルを指定
+        gauth.settings['client_config_file'] = temp_file_path
+        gauth.ServiceAuth()
+        drive = GoogleDrive(gauth)
+        st.success("Google Drive認証に成功しました。")
+        return drive
+    except Exception as e:
+        st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
+        st.stop() # 認証失敗時は処理を停止
+    finally:
+        # 一時ファイルを削除 (キャッシュされるため、実際にはアプリの終了時に削除されることが多いですが、念のため)
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+drive = authenticate_pydrive()
 
 # --- Gemini API ---
 @st.cache_resource
@@ -82,6 +108,7 @@ def configure_gemini():
     try:
         genai.configure(api_key=GENAI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
+        # st.success("Gemini API設定に成功しました。") # この行を削除/コメントアウト
         return model
     except Exception as e:
         st.error(f"Gemini APIキーの設定に失敗しました。APIキーを確認してください: {e}")
@@ -99,42 +126,19 @@ def upload_image_to_drive(image_path, drive_service):
         file = drive_service.CreateFile({'title': file_name})
         file.SetContentFile(image_path)
         file.Upload()
-        # 誰でも閲覧できるように権限を設定
-        file.InsertPermission({'type': 'anyone', 'value': 'anyone', 'role': 'reader'})
-        st.write(f"画像 '{file_name}' をGoogle Driveにアップロードしました。")
+        # 誰でも閲覧できるように権限を設定 (今回は個別のメールアドレスに編集権限を付与するため、これは不要になる)
+        # file.InsertPermission({'type': 'anyone', 'value': 'anyone', 'role': 'reader'})
+        # st.write(f"画像 '{file_name}' をGoogle Driveにアップロードしました。") # 処理メッセージを削除
         return f"https://drive.google.com/uc?id={file['id']}"
     except Exception as e:
         st.error(f"Google Driveへの画像アップロード中にエラーが発生しました: {e}")
         return None
 
-import json
-import os
-
-def get_or_create_user_spreadsheet(gc, email, title_prefix="Xポスト一覧_"):
-    db_file = "user_sheets.json"
-    if os.path.exists(db_file):
-        with open(db_file, "r") as f:
-            user_sheets = json.load(f)
-    else:
-        user_sheets = {}
-
-    if email in user_sheets:
-        spreadsheet_id = user_sheets[email]
-        sh = gc.open_by_key(spreadsheet_id)
-    else:
-        sh = gc.create(f"{title_prefix}{email}")
-        spreadsheet_id = sh.id
-        user_sheets[email] = spreadsheet_id
-        with open(db_file, "w") as f:
-            json.dump(user_sheets, f)
-        # メールアドレスに編集者権限を付与
-        sh.share(email, perm_type='user', role='writer')
-    return sh
-
 def extract_post_info(image_path, gemini_model):
     """
     Gemini APIを使用して画像から投稿情報を抽出する。
     プロンプトを修正し、「アカウントID」も抽出するように変更。
+    また、Geminiの出力に含まれる<br>タグを改行コードに置換する。
     """
     try:
         image_data = Image.open(image_path)
@@ -148,7 +152,9 @@ def extract_post_info(image_path, gemini_model):
         | 例の投稿内容 | なまいきくん | 1namaiki | 2025年7月3日 午後11:41 | 100 | 10 | 5 | 1万 | 20 |
         """
         response = gemini_model.generate_content([prompt, image_data])
-        return response.text
+        # <br>タグを改行コードに置換
+        cleaned_text = response.text.replace('<br>', '\n').replace('<BR>', '\n')
+        return cleaned_text
     except Exception as e:
         st.error(f"Gemini APIでの情報抽出中にエラーが発生しました: {e}")
         return None
@@ -179,66 +185,6 @@ def parse_table(text):
         return None
     return dict(zip(headers_row, values_row))
 
-def get_or_create_spreadsheet(gspread_client, drive_service, user_name):
-    """
-    ユーザー名に対応するスプレッドシートを取得または新規作成する。
-    """
-    spreadsheet_title = f"Xポスト自動化_{user_name}"
-    try:
-        # 既存のスプレッドシートをタイトルで検索
-        spreadsheet = gspread_client.open(spreadsheet_title)
-        st.write(f"既存のスプレッドシート '{spreadsheet_title}' を使用します。")
-        return spreadsheet
-    except SpreadsheetNotFound:
-        # スプレッドシートが存在しない場合、新規作成
-        st.write(f"スプレッドシート '{spreadsheet_title}' を新規作成します。")
-        spreadsheet = gspread_client.create(spreadsheet_title)
-        # 作成したスプレッドシートを誰でも閲覧できるように共有設定
-        spreadsheet.share('', perm_type='anyone', role='reader')
-        st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成しました。")
-        # デフォルトで作成される'Sheet1'を削除し、最初のワークシートを適切に管理
-        # gspread 5.0以降では、create時にデフォルトで1つワークシートが作成される
-        # 必要に応じて、既存の'Sheet1'を削除するロジックを追加することも可能だが、
-        # 今回は発信者ごとのタブを作成するため、そのままにしておくか、
-        # 後続のget_or_create_worksheetで最初のタブを適切に扱う。
-        return spreadsheet
-    except Exception as e:
-        st.error(f"スプレッドシートの取得または作成中にエラーが発生しました: {e}")
-        return None
-
-def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
-    """
-    ユーザーのメールアドレスに対応するスプレッドシートを取得または新規作成する。
-    新規作成時には、指定されたメールアドレスに編集権限を付与する。
-    """
-    spreadsheet_title = f"Xポスト自動化_{user_email}"
-    try:
-        # 既存のスプレッドシートをタイトルで検索
-        spreadsheet = gspread_client.open(spreadsheet_title)
-        st.write(f"既存のスプレッドシート '{spreadsheet_title}' を使用します。")
-        return spreadsheet
-    except SpreadsheetNotFound:
-        # スプレッドシートが存在しない場合、新規作成
-        st.write(f"スプレッドシート '{spreadsheet_title}' を新規作成します。")
-        spreadsheet = gspread_client.create(spreadsheet_title)
-        
-        # 作成したスプレッドシートに、指定されたメールアドレスに編集権限を付与
-        try:
-            spreadsheet.share(user_email, perm_type='user', role='writer')
-            st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成し、{user_email} に編集権限を付与しました。")
-        except Exception as share_e:
-            st.warning(f"スプレッドシートの共有設定中にエラーが発生しました。手動で共有設定を行ってください: {share_e}")
-            st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成しました。")
-
-        # デフォルトで作成される'Sheet1'を削除し、最初のワークシートを適切に管理
-        # gspread 5.0以降では、create時にデフォルトで1つワークシートが作成される
-        # 今回は発信者ごとのタブを作成するため、そのままにしておくか、
-        # 後続のget_or_create_worksheetで最初のタブを適切に扱う。
-        return spreadsheet
-    except Exception as e:
-        st.error(f"スプレッドシートの取得または作成中にエラーが発生しました: {e}")
-        return None
-
 def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
     """
     ユーザーのメールアドレスに対応するスプレッドシートを取得または新規作成する。
@@ -249,10 +195,10 @@ def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
     try:
         # 既存のスプレッドシートをタイトルで検索
         spreadsheet = gspread_client.open(spreadsheet_title)
-        st.write(f"既存のスプレッドシート '{spreadsheet_title}' を使用します。")
+        # st.write(f"既存のスプレッドシート '{spreadsheet_title}' を使用します。") # 処理メッセージを削除
     except SpreadsheetNotFound:
         # スプレッドシートが存在しない場合、新規作成
-        st.write(f"スプレッドシート '{spreadsheet_title}' を新規作成します。")
+        # st.write(f"スプレッドシート '{spreadsheet_title}' を新規作成します。") # 処理メッセージを削除
         spreadsheet = gspread_client.create(spreadsheet_title)
         st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成しました。")
     except Exception as e:
@@ -305,6 +251,7 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
                 "fields": "gridProperties.frozenRowCount" # fields も変更
             }
         })
+
         # 2. 全て文字は中央揃え（垂直方向、水平方向両方とも）
         requests.append({
             "repeatCell": {
@@ -406,13 +353,12 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
             spreadsheet.batch_update({"requests": requests})
             st.success(f"ワークシート '{sheet_title}' の初期設定を適用しました。")
         except Exception as update_e:
-            st.warning(f"ワークシート '{sheet_title}' の初期設定適用中にエラーが発生しました。手動で設定してください: {update_e}")
+            st.warning(f"ワークsheet '{sheet_title}' の初期設定適用中にエラーが発生しました。手動で設定してください: {update_e}")
 
         return worksheet
     except Exception as e:
         st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
         return None
-
 
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
@@ -421,122 +367,103 @@ st.write("画像をアップロードすると、内容を自動で抽出して�
 # ユーザーのGoogleメールアドレス入力
 email = st.text_input("あなたのGoogleメールアドレスを入力してください")
 
+# 複数ファイルアップロードを許可し、最大30枚まで
 uploaded_files = st.file_uploader("画像をアップロードしてください（PNG/JPG、最大30枚）", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
 # メールアドレスとファイルが両方入力された場合のみ処理を開始
 if email and uploaded_files: # uploaded_filesが空リストでないことを確認
     
-    # 一時ファイルの作成
-    tmp_path = None
+    # ここに全体の処理を囲むtryブロックを追加
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_path = tmp_file.name
-
-        # use_column_widthをuse_container_widthに修正
-        st.image(tmp_path, caption="アップロード画像", use_container_width=True)
-        st.info("画像を解析中...") # ユーザーへの状態表示は残す
-
         # ユーザー専用のスプレッドシートを取得または作成
         user_spreadsheet = get_or_create_spreadsheet(gc, drive, email) # emailを渡す
         if user_spreadsheet is None:
             st.error("スプレッドシートの準備に失敗しました。")
-            # エラー発生時は後続処理を行わない
-            if tmp_path and os.path.exists(tmp_path):
-                os.remove(tmp_path)
             st.stop()
 
         # プログレスバーの初期化
-progress_text = "画像を処理中..."
-progress_bar = st.progress(0, text=progress_text)
-total_files = len(uploaded_files)
+        progress_text = "画像を処理中..."
+        progress_bar = st.progress(0, text=progress_text)
+        total_files = len(uploaded_files)
 
-for i, uploaded_file in enumerate(uploaded_files):
-    # ... 各ファイルの処理 ...
-    progress_percent = (i + 1) / total_files
-    progress_bar.progress(progress_percent, text=f"画像を処理中: {i+1}/{total_files}枚目")
-    # ...
-    st.info(f"画像を解析中... ({i+1}/{total_files}枚目)") # ユーザーへの状態表示は残す
-    # ...
-    st.text_area(f"Gemini抽出結果 ({i+1}/{total_files}枚目)", result_text, height=200) # ユーザーが結果を確認できるよう残す
-    # ...
-    st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{tab_name}' タブに追記しました！ ({i+1}/{total_files}枚目)")
-    # ...
-    st.error(f"Google Driveへの画像アップロード中にエラーが発生しました。({i+1}/{total_files}枚目)") # エラーメッセージもファイル数を表示
-    # ...
-
-progress_bar.empty() # プログレスバーを非表示にする
-st.success("すべての画像の処理が完了しました！")
-
-        # 画像をGoogleドライブにアップロード
-        image_url = upload_image_to_drive(tmp_path, drive)
-        if image_url is None:
-            st.error("Google Driveへの画像アップロードに失敗しました。")
-            if tmp_path and os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            st.stop()
-        
-        image_formula = f'=IMAGE("{image_url}", 2)'  # 元サイズで表示
-
-        # Geminiで情報抽出
-        result_text = extract_post_info(tmp_path, model)
-        if result_text is None:
-            st.error("Geminiでの情報抽出に失敗しました。")
-            if tmp_path and os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            st.stop()
-
-        st.text_area("Gemini抽出結果", result_text, height=200) # ユーザーが結果を確認できるよう残す
-
-        info = parse_table(result_text)
-        
-        if info:
-            # 発信者名とアカウントIDを取得
-            author_name = info.get("発信者名")
-            account_id = info.get("アカウントID")
-
-            if not author_name:
-                st.error("発信者名情報を抽出できませんでした。Geminiの出力形式を確認してください。")
-                if tmp_path and os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-                st.stop()
-
-            # タブ名を「発信者名（@アカウントID）」の形式で生成
-            # ここでタブ名が長くなりすぎないように、必要であれば短縮するロジックを追加することも検討
-            tab_name = f"{author_name}（{account_id}）" if account_id else author_name
-            
-            # 発信者ごとのワークシートを取得または作成
-            target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
-            if target_worksheet is None:
-                st.error("ワークシートの準備に失敗しました。")
-                if tmp_path and os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-                st.stop()
-
-            # データを追記
-            # headersの順番に合わせてデータを準備
-            row_data = [image_formula, info.get("投稿内容", ""), info.get("発信者名", ""), info.get("アカウントID", ""), 
-                        info.get("投稿時間", ""), info.get("いいね数", ""), info.get("RT数", ""), 
-                        info.get("コメント数", ""), info.get("インプレッション", ""), info.get("ブックマーク数", "")]
+        for i, uploaded_file in enumerate(uploaded_files):
+            current_file_tmp_path = None # 各ファイルのテンポラリパスをここで初期化
             try:
-                target_worksheet.append_row(row_data, value_input_option='USER_ENTERED')
-                st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{tab_name}' タブに追記しました！")
-                st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
+                # プログレスバーの更新
+                progress_percent = (i + 1) / total_files
+                progress_bar.progress(progress_percent, text=f"画像を処理中: {i+1}/{total_files}枚目")
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
+                    tmp_file.write(uploaded_file.read())
+                    current_file_tmp_path = tmp_file.name
+
+                st.image(current_file_tmp_path, caption=f"アップロード画像 {i+1}", use_container_width=True)
+                st.info(f"画像を解析中... ({i+1}/{total_files}枚目)") # ユーザーへの状態表示は残す
+
+                # 画像をGoogleドライブにアップロード
+                image_url = upload_image_to_drive(current_file_tmp_path, drive)
+                if image_url is None:
+                    st.error(f"Google Driveへの画像アップロードに失敗しました。({i+1}/{total_files}枚目)")
+                    continue # 次のファイルへ
+
+                image_formula = f'=IMAGE("{image_url}", 2)'  # 元サイズで表示
+
+                # Geminiで情報抽出
+                result_text = extract_post_info(current_file_tmp_path, model)
+                if result_text is None:
+                    st.error(f"Geminiでの情報抽出に失敗しました。({i+1}/{total_files}枚目)")
+                    continue # 次のファイルへ
+
+                st.text_area(f"Gemini抽出結果 ({i+1}/{total_files}枚目)", result_text, height=200) # ユーザーが結果を確認できるよう残す
+
+                info = parse_table(result_text)
+                
+                if info:
+                    # 発信者名とアカウントIDを取得
+                    author_name = info.get("発信者名")
+                    account_id = info.get("アカウントID")
+
+                    if not author_name:
+                        st.error(f"発信者名情報を抽出できませんでした。Geminiの出力形式を確認してください。({i+1}/{total_files}枚目)")
+                        continue # 次のファイルへ
+
+                    # タブ名を「発信者名（@アカウントID）」の形式で生成
+                    tab_name = f"{author_name}（@{account_id}）" if account_id else author_name
+                    
+                    # 発信者ごとのワークシートを取得または作成
+                    target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
+                    if target_worksheet is None:
+                        st.error(f"ワークシートの準備に失敗しました。({i+1}/{total_files}枚目)")
+                        continue # 次のファイルへ
+
+                    # データを追記
+                    row_data = [image_formula, info.get("投稿内容", ""), info.get("発信者名", ""), info.get("アカウントID", ""), 
+                                info.get("投稿時間", ""), info.get("いいね数", ""), info.get("RT数", ""), 
+                                info.get("コメント数", ""), info.get("インプレッション", ""), info.get("ブックマーク数", "")]
+                    try:
+                        target_worksheet.append_row(row_data, value_input_option='USER_ENTERED')
+                        st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{tab_name}' タブに追記しました！ ({i+1}/{total_files}枚目)")
+                        st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
+                    except Exception as e:
+                        st.error(f"スプレッドシートへの追記中にエラーが発生しました: {e} ({i+1}/{total_files}枚目)")
+                else:
+                    st.error(f"情報の抽出に失敗しました。Geminiの出力形式を確認してください。({i+1}/{total_files}枚目)")
+
             except Exception as e:
-                st.error(f"スプレッドシートへの追記中にエラーが発生しました: {e}")
-        else:
-            st.error("情報の抽出に失敗しました。Geminiの出力形式を確認してください。")
+                st.error(f"ファイル処理中に予期せぬエラーが発生しました: {e} ({i+1}/{total_files}枚目)")
+            finally:
+                # 一時ファイル削除
+                if current_file_tmp_path and os.path.exists(current_file_tmp_path):
+                    os.remove(current_file_tmp_path)
+        
+        progress_bar.empty() # プログレスバーを非表示にする
+        st.success("すべての画像の処理が完了しました！")
 
-    except Exception as e:
-        st.error(f"予期せぬエラーが発生しました: {e}")
-    finally:
-        # 一時ファイル削除
-        if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        # else: # 処理メッセージを削除
-            # st.write("一時ファイルは作成されなかったか、既に削除されています。")
+    except Exception as outer_e: # 全体の処理で発生したエラーをキャッチ
+        st.error(f"全体の処理中に予期せぬエラーが発生しました: {outer_e}")
 
-elif uploaded_file is not None and not email:
+elif uploaded_files and not email: # uploaded_filesが空リストでないことを確認
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
-elif email and uploaded_file is None:
+elif email and not uploaded_files: # uploaded_filesが空リストであることを確認
     st.info("画像をアップロードしてください。")
+
