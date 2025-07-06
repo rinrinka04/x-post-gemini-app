@@ -295,19 +295,18 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
         sheet_id = worksheet._properties['sheetId']
         requests = []
 
-        # 1. 1列固定 (最初の列を固定)
+        # 1. 1行固定 (最初の行を固定)
         requests.append({
             "updateSheetProperties": {
                 "properties": {
                     "sheetId": sheet_id,
                     "gridProperties": {
-                        "frozenColumnCount": 1
+                        "frozenRowCount": 1 # frozenColumnCount を frozenRowCount に変更
                     }
                 },
-                "fields": "gridProperties.frozenColumnCount"
+                "fields": "gridProperties.frozenRowCount" # fields も変更
             }
         })
-
         # 2. 全て文字は中央揃え（垂直方向、水平方向両方とも）
         requests.append({
             "repeatCell": {
@@ -389,15 +388,19 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
             }
         })
 
-        # 7. 列C〜Jの幅はデータに合わせる (0-indexed: C=2, J=9)
+        # 7. 列C〜Jの幅を100ピクセルに固定 (0-indexed: C=2, J=9)
         requests.append({
-            "autoResizeDimensions": {
-                "dimensions": {
+            "updateDimensionProperties": { # autoResizeDimensions から変更
+                "range": {
                     "sheetId": sheet_id,
                     "dimension": "COLUMNS",
                     "startIndex": 2,
                     "endIndex": 10 # J列の次まで
-                }
+                },
+                "properties": {
+                    "pixelSize": 100 # 幅を100ピクセルに設定
+                },
+                "fields": "pixelSize" # fields も変更
             }
         })
         
@@ -424,7 +427,6 @@ uploaded_file = st.file_uploader("画像をアップロードしてください�
 
 # メールアドレスとファイルが両方入力された場合のみ処理を開始
 if email and uploaded_file is not None:
-    # st.write("ファイルがアップロードされました") # 処理メッセージを削除
     
     # 一時ファイルの作成
     tmp_path = None
@@ -438,43 +440,35 @@ if email and uploaded_file is not None:
         st.info("画像を解析中...") # ユーザーへの状態表示は残す
 
         # ユーザー専用のスプレッドシートを取得または作成
-        # st.write(f"'{email}'さんのスプレッドシートを取得/作成します。") # 処理メッセージを削除
         user_spreadsheet = get_or_create_spreadsheet(gc, drive, email) # emailを渡す
         if user_spreadsheet is None:
             st.error("スプレッドシートの準備に失敗しました。")
             # エラー発生時は後続処理を行わない
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
-                # st.write("一時ファイル削除完了") # 処理メッセージを削除
             st.stop()
 
         # 画像をGoogleドライブにアップロード
-        # st.write("Googleドライブにアップロード開始") # 処理メッセージを削除
         image_url = upload_image_to_drive(tmp_path, drive)
         if image_url is None:
             st.error("Google Driveへの画像アップロードに失敗しました。")
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
-                # st.write("一時ファイル削除完了") # 処理メッセージを削除
             st.stop()
         
-        # st.write(f"image_url: {image_url}") # 処理メッセージを削除
         image_formula = f'=IMAGE("{image_url}", 2)'  # 元サイズで表示
 
         # Geminiで情報抽出
-        # st.write("Geminiで情報抽出開始") # 処理メッセージを削除
         result_text = extract_post_info(tmp_path, model)
         if result_text is None:
             st.error("Geminiでの情報抽出に失敗しました。")
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
-                # st.write("一時ファイル削除完了") # 処理メッセージを削除
             st.stop()
 
         st.text_area("Gemini抽出結果", result_text, height=200) # ユーザーが結果を確認できるよう残す
 
         info = parse_table(result_text)
-        # st.write(f"parse_tableの結果: {info}") # 処理メッセージを削除
         
         if info:
             # 発信者名とアカウントIDを取得
@@ -485,7 +479,6 @@ if email and uploaded_file is not None:
                 st.error("発信者名情報を抽出できませんでした。Geminiの出力形式を確認してください。")
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
-                    # st.write("一時ファイル削除完了") # 処理メッセージを削除
                 st.stop()
 
             # タブ名を「発信者名（@アカウントID）」の形式で生成
@@ -493,13 +486,11 @@ if email and uploaded_file is not None:
             tab_name = f"{author_name}（{account_id}）" if account_id else author_name
             
             # 発信者ごとのワークシートを取得または作成
-            # st.write(f"'{tab_name}'さんのタブを取得/作成します。") # 処理メッセージを削除
             target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
             if target_worksheet is None:
                 st.error("ワークシートの準備に失敗しました。")
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
-                    # st.write("一時ファイル削除完了") # 処理メッセージを削除
                 st.stop()
 
             # データを追記
@@ -522,7 +513,6 @@ if email and uploaded_file is not None:
         # 一時ファイル削除
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-            # st.write("一時ファイル削除完了") # 処理メッセージを削除
         # else: # 処理メッセージを削除
             # st.write("一時ファイルは作成されなかったか、既に削除されています。")
 
