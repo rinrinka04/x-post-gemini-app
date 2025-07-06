@@ -4,12 +4,11 @@ import tempfile
 import google.generativeai as genai
 from PIL import Image
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2.service_account import Credentials # gspreadとPyDrive2の認証で使用
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
 import json # jsonモジュールはここでインポート
-# import googleapiclient.discovery # 使用されていないため削除
 
 # --- パスワード認証 ---
 PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
@@ -61,14 +60,10 @@ def authenticate_gspread():
 gc = authenticate_gspread()
 
 # --- Google Drive認証 ---
-# authenticate_pydrive 関数を、サービスアカウントのJSONキーを一時ファイルに書き出して認証する方式に戻します。
 @st.cache_resource
 def authenticate_pydrive():
     """PyDriveを認証し、認証オブジェクトをキャッシュする"""
-    temp_file_path = None # 一時ファイルのパスを初期化
     try:
-        gauth = GoogleAuth()
-        
         # Streamlit secretsからGoogle Driveの認証情報を取得
         google_credentials_json_data = st.secrets.get("GOOGLE_CREDENTIALS")
 
@@ -76,19 +71,21 @@ def authenticate_pydrive():
             st.error("Streamlit Secretsに 'GOOGLE_CREDENTIALS' が設定されていません。")
             st.stop()
 
-        # secretsが文字列の場合はJSONとしてパース、既に辞書の場合はJSON文字列に変換
+        # secretsが文字列の場合はJSONとしてパース、既に辞書の場合はそのまま使用
         if isinstance(google_credentials_json_data, str):
-            client_json_content = google_credentials_json_data
-        else: # secrets.tomlで直接辞書として定義されている場合など
-            client_json_content = json.dumps(google_credentials_json_data) # DictをJSON文字列に変換
+            cred_dict = json.loads(google_credentials_json_data)
+        else:
+            cred_dict = google_credentials_json_data
 
-        # 認証情報を一時ファイルに書き込む
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_file:
-            temp_file.write(client_json_content)
-            temp_file_path = temp_file.name # 一時ファイルのパスを保持
+        # PyDrive2のGoogleAuth設定を直接service_configとして渡す
+        pydrive_settings = {
+            "client_config_backend": "service",
+            "service_config": {
+                "client_json": cred_dict # 認証情報を辞書として直接渡す
+            }
+        }
         
-        # GoogleAuthの設定で一時ファイルを指定
-        gauth.settings['client_config_file'] = temp_file_path
+        gauth = GoogleAuth(settings=pydrive_settings)
         gauth.ServiceAuth() # サービスアカウント認証を実行
         drive = GoogleDrive(gauth)
         # st.success("Google Drive認証に成功しました。") # 処理メッセージを削除
@@ -96,10 +93,6 @@ def authenticate_pydrive():
     except Exception as e:
         st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
         st.stop() # 認証失敗時は処理を停止
-    finally:
-        # 一時ファイルを削除 (キャッシュされるため、実際にはアプリの終了時に削除されることが多いですが、念のため)
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
 
 drive = authenticate_pydrive()
 
@@ -467,4 +460,6 @@ if email and uploaded_files: # uploaded_filesが空リストでないことを�
 elif uploaded_files and not email: # uploaded_filesが空リストでないことを確認
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
 elif email and not uploaded_files: # uploaded_filesが空リストであることを確認
+    st.info("画像をアップロードしてください。")
+
     st.info("画像をアップロードしてください。")
