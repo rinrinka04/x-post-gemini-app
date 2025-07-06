@@ -50,22 +50,20 @@ def authenticate_gspread():
 
 gc = authenticate_gspread()
 
-# --- Google Drive認証 ---
-@st.cache_resource
-def authenticate_pydrive():
-    """PyDriveを認証し、認証オブジェクトをキャッシュする"""
-    try:
-        gauth = GoogleAuth()
-        # サービスアカウント認証
-        gauth.ServiceAuth()
-        drive = GoogleDrive(gauth)
-        st.success("Google Drive認証に成功しました。")
-        return drive
-    except Exception as e:
-        st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
-        st.stop() # 認証失敗時は処理を停止
+import json
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 
-drive = authenticate_pydrive()
+# --- Google Drive認証 ---
+pydrive_settings = {
+    "client_config_backend": "service",
+    "service_config": {
+        "client_json": json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+    }
+}
+gauth = GoogleAuth(settings=pydrive_settings)
+gauth.ServiceAuth()
+drive = GoogleDrive(gauth)
 
 # --- Gemini API ---
 @st.cache_resource
