@@ -9,6 +9,7 @@ from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
 import json # jsonモジュールはここでインポート
+import streamlit as st
 
 # --- パスワード認証 ---
 PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
@@ -45,7 +46,7 @@ headers = ["画像", "投稿内容", "発信者名", "アカウントID", "投�
 
 # --- Google Sheets認証 ---
 @st.cache_resource
-def authenticate_pydrive():
+def authenticate_gspread():
     """PyDrive2をサービスアカウントで認証し、認証オブジェクトをキャッシュする"""
     import tempfile
     import os
@@ -380,6 +381,10 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
     except Exception as e:
         st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
         return None
+
+gc = authenticate_gspread()
+drive = authenticate_pydrive()
+model = configure_gemini()
 
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
