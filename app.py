@@ -54,7 +54,6 @@ def authenticate_gspread():
         # credentials.jsonはコードと同じディレクトリに配置してください
         creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
         gc = gspread.authorize(creds)
-        st.success("Google Sheets認証に成功しました。")
         return gc
     except Exception as e:
         st.error(f"Google Sheets認証に失敗しました。credentials.jsonを確認してください: {e}")
@@ -83,7 +82,6 @@ def configure_gemini():
     try:
         genai.configure(api_key=GENAI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
-        st.success("Gemini API設定に成功しました。")
         return model
     except Exception as e:
         st.error(f"Gemini APIキーの設定に失敗しました。APIキーを確認してください: {e}")
@@ -423,10 +421,10 @@ st.write("画像をアップロードすると、内容を自動で抽出して�
 # ユーザーのGoogleメールアドレス入力
 email = st.text_input("あなたのGoogleメールアドレスを入力してください")
 
-uploaded_file = st.file_uploader("画像をアップロードしてください（PNG/JPG）", type=["png", "jpg", "jpeg"])
+uploaded_files = st.file_uploader("画像をアップロードしてください（PNG/JPG、最大30枚）", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
 # メールアドレスとファイルが両方入力された場合のみ処理を開始
-if email and uploaded_file is not None:
+if email and uploaded_files: # uploaded_filesが空リストでないことを確認
     
     # 一時ファイルの作成
     tmp_path = None
@@ -447,6 +445,28 @@ if email and uploaded_file is not None:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
             st.stop()
+
+        # プログレスバーの初期化
+progress_text = "画像を処理中..."
+progress_bar = st.progress(0, text=progress_text)
+total_files = len(uploaded_files)
+
+for i, uploaded_file in enumerate(uploaded_files):
+    # ... 各ファイルの処理 ...
+    progress_percent = (i + 1) / total_files
+    progress_bar.progress(progress_percent, text=f"画像を処理中: {i+1}/{total_files}枚目")
+    # ...
+    st.info(f"画像を解析中... ({i+1}/{total_files}枚目)") # ユーザーへの状態表示は残す
+    # ...
+    st.text_area(f"Gemini抽出結果 ({i+1}/{total_files}枚目)", result_text, height=200) # ユーザーが結果を確認できるよう残す
+    # ...
+    st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{tab_name}' タブに追記しました！ ({i+1}/{total_files}枚目)")
+    # ...
+    st.error(f"Google Driveへの画像アップロード中にエラーが発生しました。({i+1}/{total_files}枚目)") # エラーメッセージもファイル数を表示
+    # ...
+
+progress_bar.empty() # プログレスバーを非表示にする
+st.success("すべての画像の処理が完了しました！")
 
         # 画像をGoogleドライブにアップロード
         image_url = upload_image_to_drive(tmp_path, drive)
