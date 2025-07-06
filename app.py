@@ -34,6 +34,10 @@ gc = gspread.authorize(creds)
 
 # --- Google Drive認証 ---
 gauth = GoogleAuth()
+gauth.settings['client_config_backend'] = 'service'
+gauth.settings['service_config'] = {
+    'client_json': json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+}
 gauth.ServiceAuth()
 drive = GoogleDrive(gauth)
 
