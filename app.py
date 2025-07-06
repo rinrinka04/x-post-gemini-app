@@ -61,8 +61,6 @@ gauth.ServiceAuth()
 drive = GoogleDrive(gauth)
 
 # --- スプレッドシート ---
-sh = gc.open_by_key("1ZXxNhnvjix50IDimcdtPvOX8SZymJcDbQF_P3C7OqLw")
-
 headers = ["画像", "投稿内容", "発信者", "投稿時間", "いいね数", "RT数", "コメント数", "インプレッション", "ブックマーク数"]
 
 def upload_image_to_drive(image_path):
@@ -115,63 +113,133 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers):
         worksheet.append_row(headers)
         return worksheet
 
+import json
+import os
+
+def get_or_create_user_spreadsheet(gc, user, title_prefix="Xポスト一覧_"):
+    db_file = "user_sheets.json"
+    if os.path.exists(db_file):
+        with open(db_file, "r") as f:
+            user_sheets = json.load(f)
+    else:
+        user_sheets = {}
+
+    if user in user_sheets:
+        spreadsheet_id = user_sheets[user]
+        sh = gc.open_by_key(spreadsheet_id)
+    else:
+        sh = gc.create(f"{title_prefix}{user}")
+        spreadsheet_id = sh.id
+        user_sheets[user] = spreadsheet_id
+        with open(db_file, "w") as f:
+            json.dump(user_sheets, f)
+    return sh
+
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
 st.write("画像をアップロードすると、内容を自動で抽出してGoogleスプレッドシートの、投稿者ごとのタブに追記します。")
 
+# ユーザー名入力
+user_name = st.text_input("あなたの名前を入力してください（スプレッドシートの識別に使われます）")
+
 uploaded_file = st.file_uploader("画像をアップロードしてください（PNG/JPG）", type=["png", "jpg", "jpeg"])
 
-if uploaded_file is not None:
+# ユーザー名とファイルが両方入力された場合のみ処理を開始
+if user_name and uploaded_file is not None:
     st.write("ファイルがアップロードされました")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
+    
+    # 一時ファイルの作成
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
+            tmp_file.write(uploaded_file.read())
+            tmp_path = tmp_file.name
 
-    st.image(tmp_path, caption="アップロード画像", use_column_width=True)
-    st.info("画像を解析中...")
+        st.image(tmp_path, caption="アップロード画像", use_column_width=True)
+        st.info("画像を解析中...")
 
-    # 画像をGoogleドライブにアップロード
-    st.write("Googleドライブにアップロード開始")
-    image_url = upload_image_to_drive(tmp_path)
-    st.write(f"image_url: {image_url}")
-    image_formula = f'=IMAGE("{image_url}", 2)'  # 元サイズで表示
-
-    # Geminiで情報抽出
-    st.write("Geminiで情報抽出開始")
-    result_text = extract_post_info(tmp_path)
-    st.text_area("Gemini抽出結果", result_text, height=200)
-
-    info = parse_table(result_text)
-    st.write(f"parse_tableの結果: {info}")
-    if info:
-        # 発信者名を取得
-        poster_name = info.get("発信者")
-        if not poster_name:
-            st.error("発信者情報を抽出できませんでした。")
-            os.remove(tmp_path)
-            st.write("一時ファイル削除完了")
+        # ユーザー専用のスプレッドシートを取得または作成
+        st.write(f"'{user_name}'さんのスプレッドシートを取得/作成します。")
+        user_spreadsheet = get_or_create_spreadsheet(gc, drive, user_name)
+        if user_spreadsheet is None:
+            st.error("スプレッドシートの準備に失敗しました。")
+            # エラー発生時は後続処理を行わない
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                st.write("一時ファイル削除完了")
             st.stop()
 
-        # 発信者ごとのワークシートを取得または作成
-        try:
-            worksheet = get_or_create_worksheet(sh, poster_name, headers)
-        except Exception as e:
-            st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
-            os.remove(tmp_path)
-            st.write("一時ファイル削除完了")
+        # 画像をGoogleドライブにアップロード
+        st.write("Googleドライブにアップロード開始")
+        image_url = upload_image_to_drive(tmp_path, drive)
+        if image_url is None:
+            st.error("Google Driveへの画像アップロードに失敗しました。")
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                st.write("一時ファイル削除完了")
+            st.stop()
+        
+        st.write(f"image_url: {image_url}")
+        image_formula = f'=IMAGE("{image_url}", 2)'  # 元サイズで表示
+
+        # Geminiで情報抽出
+        st.write("Geminiで情報抽出開始")
+        result_text = extract_post_info(tmp_path, model)
+        if result_text is None:
+            st.error("Geminiでの情報抽出に失敗しました。")
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                st.write("一時ファイル削除完了")
             st.stop()
 
-        # データを追記
-        row = [image_formula] + [info.get(h, "") for h in headers[1:]]
-        try:
-            worksheet.append_row(row, value_input_option='USER_ENTERED')
-            st.success(f"スプレッドシートの'{poster_name}'タブに追記しました！")
-            st.markdown(f"[スプレッドシートを開く]({sh.url})")
-        except Exception as e:
-            st.error(f"スプレッドシートへの追記中にエラーが発生しました: {e}")
-    else:
-        st.error("情報の抽出に失敗しました。")
+        st.text_area("Gemini抽出結果", result_text, height=200)
 
-    # 一時ファイル削除
-    os.remove(tmp_path)
-    st.write("一時ファイル削除完了")
+        info = parse_table(result_text)
+        st.write(f"parse_tableの結果: {info}")
+        
+        if info:
+            # 発信者名を取得
+            poster_name = info.get("発信者")
+            if not poster_name:
+                st.error("発信者情報を抽出できませんでした。Geminiの出力形式を確認してください。")
+                # エラー発生時は後続処理を行わない
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                    st.write("一時ファイル削除完了")
+                st.stop()
+
+            # 発信者ごとのワークシートを取得または作成
+            st.write(f"'{poster_name}'さんのタブを取得/作成します。")
+            target_worksheet = get_or_create_worksheet(user_spreadsheet, poster_name, headers)
+            if target_worksheet is None:
+                st.error("ワークシートの準備に失敗しました。")
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                    st.write("一時ファイル削除完了")
+                st.stop()
+
+            # データを追記
+            row_data = [image_formula] + [info.get(h, "") for h in headers[1:]]
+            try:
+                target_worksheet.append_row(row_data, value_input_option='USER_ENTERED')
+                st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{poster_name}' タブに追記しました！")
+                st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
+            except Exception as e:
+                st.error(f"スプレッドシートへの追記中にエラーが発生しました: {e}")
+        else:
+            st.error("情報の抽出に失敗しました。Geminiの出力形式を確認してください。")
+
+    except Exception as e:
+        st.error(f"予期せぬエラーが発生しました: {e}")
+    finally:
+        # 一時ファイル削除
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            st.write("一時ファイル削除完了")
+        else:
+            st.write("一時ファイルは作成されなかったか、既に削除されています。")
+
+elif uploaded_file is not None and not user_name:
+    st.warning("画像をアップロードする前に、あなたの名前を入力してください。")
+elif user_name and uploaded_file is None:
+    st.info("画像をアップロードしてください。")
