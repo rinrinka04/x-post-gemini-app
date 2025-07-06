@@ -202,6 +202,39 @@ def get_or_create_spreadsheet(gspread_client, drive_service, user_name):
         st.error(f"スプレッドシートの取得または作成中にエラーが発生しました: {e}")
         return None
 
+def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
+    """
+    ユーザーのメールアドレスに対応するスプレッドシートを取得または新規作成する。
+    新規作成時には、指定されたメールアドレスに編集権限を付与する。
+    """
+    spreadsheet_title = f"Xポスト自動化_{user_email}"
+    try:
+        # 既存のスプレッドシートをタイトルで検索
+        spreadsheet = gspread_client.open(spreadsheet_title)
+        st.write(f"既存のスプレッドシート '{spreadsheet_title}' を使用します。")
+        return spreadsheet
+    except SpreadsheetNotFound:
+        # スプレッドシートが存在しない場合、新規作成
+        st.write(f"スプレッドシート '{spreadsheet_title}' を新規作成します。")
+        spreadsheet = gspread_client.create(spreadsheet_title)
+        
+        # 作成したスプレッドシートに、指定されたメールアドレスに編集権限を付与
+        try:
+            spreadsheet.share(user_email, perm_type='user', role='writer')
+            st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成し、{user_email} に編集権限を付与しました。")
+        except Exception as share_e:
+            st.warning(f"スプレッドシートの共有設定中にエラーが発生しました。手動で共有設定を行ってください: {share_e}")
+            st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成しました。")
+
+        # デフォルトで作成される'Sheet1'を削除し、最初のワークシートを適切に管理
+        # gspread 5.0以降では、create時にデフォルトで1つワークシートが作成される
+        # 今回は発信者ごとのタブを作成するため、そのままにしておくか、
+        # 後続のget_or_create_worksheetで最初のタブを適切に扱う。
+        return spreadsheet
+    except Exception as e:
+        st.error(f"スプレッドシートの取得または作成中にエラーが発生しました: {e}")
+        return None
+
 def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
     """
     指定されたスプレッドシート内で、指定されたタイトル（発信者名）のワークシートを取得または新規作成する。
