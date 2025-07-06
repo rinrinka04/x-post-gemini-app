@@ -60,24 +60,12 @@ def authenticate_gspread():
 gc = authenticate_gspread()
 
 # --- Google Drive認証 ---
-
 pydrive_settings = {
-
-    "client_config_backend": "service",
-
-    "service_config": {
-
-        "client_json": st.secrets["GOOGLE_CREDENTIALS"]
-
-    }
-
+    "client_config_backend": "service",
+    "service_config": {
+        "client_json": st.secrets["GOOGLE_CREDENTIALS"]
+    }
 }
-
-gauth = GoogleAuth(settings=pydrive_settings)
-
-gauth.ServiceAuth()
-
-drive = GoogleDrive(gauth)
 
 # --- Gemini API ---
 @st.cache_resource
