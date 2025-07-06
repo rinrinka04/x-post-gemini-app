@@ -312,7 +312,8 @@ if email and uploaded_file is not None:
             tmp_file.write(uploaded_file.read())
             tmp_path = tmp_file.name
 
-        st.image(tmp_path, caption="アップロード画像", use_column_width=True)
+        # use_column_widthをuse_container_widthに修正
+        st.image(tmp_path, caption="アップロード画像", use_container_width=True)
         st.info("画像を解析中...") # ユーザーへの状態表示は残す
 
         # ユーザー専用のスプレッドシートを取得または作成
@@ -367,7 +368,8 @@ if email and uploaded_file is not None:
                 st.stop()
 
             # タブ名を「発信者名（@アカウントID）」の形式で生成
-            tab_name = f"{author_name}（@{account_id}）" if account_id else author_name
+            # ここでタブ名が長くなりすぎないように、必要であれば短縮するロジックを追加することも検討
+            tab_name = f"{author_name}（{account_id}）" if account_id else author_name
             
             # 発信者ごとのワークシートを取得または作成
             # st.write(f"'{tab_name}'さんのタブを取得/作成します。") # 処理メッセージを削除
@@ -406,6 +408,4 @@ if email and uploaded_file is not None:
 elif uploaded_file is not None and not email:
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
 elif email and uploaded_file is None:
-    st.info("画像をアップロードしてください。")
-
     st.info("画像をアップロードしてください。")
