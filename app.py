@@ -1,5 +1,12 @@
 import streamlit as st
 import os
+# --- Secretsから認証情報を取得 ---
+GENAI_API_KEY = st.secrets["GENAI_API_KEY"]
+GOOGLE_CREDENTIALS = st.secrets["GOOGLE_CREDENTIALS"]
+
+# credentials.jsonを一時ファイルとして保存
+with open("credentials.json", "w") as f:
+    f.write(GOOGLE_CREDENTIALS)
 import tempfile
 import google.generativeai as genai
 from PIL import Image
