@@ -105,6 +105,30 @@ def upload_image_to_drive(image_path, drive_service):
         st.error(f"Google Driveへの画像アップロード中にエラーが発生しました: {e}")
         return None
 
+import json
+import os
+
+def get_or_create_user_spreadsheet(gc, email, title_prefix="Xポスト一覧_"):
+    db_file = "user_sheets.json"
+    if os.path.exists(db_file):
+        with open(db_file, "r") as f:
+            user_sheets = json.load(f)
+    else:
+        user_sheets = {}
+
+    if email in user_sheets:
+        spreadsheet_id = user_sheets[email]
+        sh = gc.open_by_key(spreadsheet_id)
+    else:
+        sh = gc.create(f"{title_prefix}{email}")
+        spreadsheet_id = sh.id
+        user_sheets[email] = spreadsheet_id
+        with open(db_file, "w") as f:
+            json.dump(user_sheets, f)
+        # メールアドレスに編集者権限を付与
+        sh.share(email, perm_type='user', role='writer')
+    return sh
+
 def extract_post_info(image_path, gemini_model):
     """
     Gemini APIを使用して画像から投稿情報を抽出する。
@@ -202,15 +226,15 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
 
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
-st.write("画像をアップロードすると、内容を自動で抽出してGoogleスプレッドシートの、投稿者ごとのタブに追記します。")
+st.write("画像をアップロードすると、内容を自動で抽出してあなた専用のGoogleスプレッドシートの、投稿者ごとのタブに追記します。")
 
-# ユーザー名入力
-user_name = st.text_input("あなたの名前を入力してください（スプレッドシートの識別に使われます）")
+# ユーザーのGoogleメールアドレス入力
+email = st.text_input("あなたのGoogleメールアドレスを入力してください")
 
 uploaded_file = st.file_uploader("画像をアップロードしてください（PNG/JPG）", type=["png", "jpg", "jpeg"])
 
-# ユーザー名とファイルが両方入力された場合のみ処理を開始
-if user_name and uploaded_file is not None:
+# メールアドレスとファイルが両方入力された場合のみ処理を開始
+if email and uploaded_file is not None:
     st.write("ファイルがアップロードされました")
     
     # 一時ファイルの作成
@@ -224,8 +248,8 @@ if user_name and uploaded_file is not None:
         st.info("画像を解析中...")
 
         # ユーザー専用のスプレッドシートを取得または作成
-        st.write(f"'{user_name}'さんのスプレッドシートを取得/作成します。")
-        user_spreadsheet = get_or_create_spreadsheet(gc, drive, user_name)
+        st.write(f"'{email}'さんのスプレッドシートを取得/作成します。")
+        user_spreadsheet = get_or_create_spreadsheet(gc, drive, email) # emailを渡す
         if user_spreadsheet is None:
             st.error("スプレッドシートの準備に失敗しました。")
             # エラー発生時は後続処理を行わない
@@ -304,7 +328,7 @@ if user_name and uploaded_file is not None:
         else:
             st.write("一時ファイルは作成されなかったか、既に削除されています。")
 
-elif uploaded_file is not None and not user_name:
-    st.warning("画像をアップロードする前に、あなたの名前を入力してください。")
-elif user_name and uploaded_file is None:
+elif uploaded_file is not None and not email: # user_name を email に変更
+    st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
+elif email and uploaded_file is None: # user_name を email に変更
     st.info("画像をアップロードしてください。")
