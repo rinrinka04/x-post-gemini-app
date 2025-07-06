@@ -45,24 +45,49 @@ headers = ["画像", "投稿内容", "発信者名", "アカウントID", "投�
 
 # --- Google Sheets認証 ---
 @st.cache_resource
-def authenticate_gspread():
-    """gspreadを認証し、認証オブジェクトをキャッシュする"""
+def authenticate_pydrive():
     try:
         google_credentials = st.secrets["GOOGLE_CREDENTIALS"]
         if isinstance(google_credentials, str):
             cred_dict = json.loads(google_credentials)
         else:
             cred_dict = google_credentials
-        creds = Credentials.from_service_account_info(cred_dict, scopes=SCOPES)
-        gc = gspread.authorize(creds)
-        st.success("Google Sheets認証に成功しました。")
-        return gc
-    except Exception as e:
-        st.error(f"Google Sheets認証に失敗しました。認証情報を確認してください: {e}")
-        st.stop()
 
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
+        temp_dir = tempfile.mkdtemp()
+        client_secrets_path = os.path.join(temp_dir, "client_secrets.json")
+        with open(client_secrets_path, "w") as f:
+            json.dump(cred_dict, f)
+
+        settings_yaml = f"""
+client_config_backend: file
+client_config_file: client_secrets.json
+save_credentials: False
+oauth_scope:
+  - https://www.googleapis.com/auth/drive
+  - https://www.googleapis.com/auth/drive.file
+  - https://www.googleapis.com/auth/drive.appdata
+  - https://www.googleapis.com/auth/drive.metadata
+  - https://www.googleapis.com/auth/drive.scripts
+service_config:
+  client_user_email: {cred_dict['client_email']}
+  client_json_file_path: {client_secrets_path}
+"""
+        settings_path = os.path.join(temp_dir, "settings.yaml")
+        with open(settings_path, "w") as f:
+            f.write(settings_yaml)
+
+        old_cwd = os.getcwd()
+        os.chdir(temp_dir)
+
+        gauth = GoogleAuth(settings_file=settings_path)
+        gauth.ServiceAuth()
+        drive = GoogleDrive(gauth)
+
+        os.chdir(old_cwd)
+        return drive
+    except Exception as e:
+        st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
+        st.stop()
 
 # --- Google Drive認証 ---
 pydrive_settings = {
@@ -295,7 +320,7 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
         return None
 
 gc = authenticate_gspread()
-drive = authenticate_pydrive()
+drive = authenticate_pydrive()  # ← 必ず関数定義の後で呼び出す
 model = configure_gemini()
 
 # --- Streamlit UI ---
