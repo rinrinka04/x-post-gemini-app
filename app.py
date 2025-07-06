@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-
 PASSWORD = "xpost00"  # ←ここを好きなパスワードに変更
 
 if "authenticated" not in st.session_state:
@@ -13,14 +12,6 @@ if not st.session_state["authenticated"]:
         st.success("認証成功！")
     else:
         st.stop()
-
-# --- Secretsから認証情報を取得 ---
-GENAI_API_KEY = st.secrets["GENAI_API_KEY"]
-GOOGLE_CREDENTIALS = st.secrets["GOOGLE_CREDENTIALS"]
-
-# credentials.jsonを一時ファイルとして保存
-with open("credentials.json", "w") as f:
-    f.write(GOOGLE_CREDENTIALS)
 import tempfile
 import google.generativeai as genai
 from PIL import Image
@@ -28,68 +19,120 @@ import gspread
 from google.oauth2.service_account import Credentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
+from gspread.exceptions import WorksheetNotFound, SpreadsheetNotFound
 
 # --- 設定 ---
-GENAI_API_KEY = "AIzaSyCc2MQQ2ytt32gzMq53L_Z8SKhWWMRjJ1s"  # ←ここを自分のGemini APIキーに書き換えてください
-SPREADSHEET_ID = "1ZXxNhnvjix50IDimcdtPvOX8SZymJcDbQF_P3C3OqLw"  # ←自分のスプレッドシートID
+# Gemini APIキーをここに設定してください
+GENAI_API_KEY = "AIzaSyCc2MQQ2ytt32gzMq53L_Z8SKhWWMRjJ1s"
 
-# --- Gemini API ---
-genai.configure(api_key=GENAI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
-
-# --- Google Sheets認証 ---
+# Google SheetsとGoogle Driveのスコープ
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive'
 ]
-# credentials.jsonはコードと同じディレクトリに配置してください
-creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
-gc = gspread.authorize(creds)
 
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-
-# --- Google Drive認証 ---
-pydrive_settings = {
-    "client_config_backend": "service",
-    "service_config": {
-        "client_json": st.secrets["GOOGLE_CREDENTIALS"]  # ←ここはJSON文字列
-    }
-}
-gauth = GoogleAuth(settings=pydrive_settings)
-gauth.ServiceAuth()
-drive = GoogleDrive(gauth)
-
-# --- スプレッドシート ---
+# Google Sheetsのヘッダー定義
 headers = ["画像", "投稿内容", "発信者", "投稿時間", "いいね数", "RT数", "コメント数", "インプレッション", "ブックマーク数"]
 
-def upload_image_to_drive(image_path):
-    file = drive.CreateFile({'title': os.path.basename(image_path)})
-    file.SetContentFile(image_path)
-    file.Upload()
-    file.InsertPermission({'type': 'anyone', 'value': 'anyone', 'role': 'reader'})
-    return f"https://drive.google.com/uc?id={file['id']}"
+# --- Google Sheets認証 ---
+@st.cache_resource
+def authenticate_gspread():
+    """gspreadを認証し、認証オブジェクトをキャッシュする"""
+    try:
+        # credentials.jsonはコードと同じディレクトリに配置してください
+        creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        st.success("Google Sheets認証に成功しました。")
+        return gc
+    except Exception as e:
+        st.error(f"Google Sheets認証に失敗しました。credentials.jsonを確認してください: {e}")
+        st.stop() # 認証失敗時は処理を停止
 
-def extract_post_info(image_path):
-    image_data = Image.open(image_path)
-    prompt = """
-    この画像はX（旧Twitter）のポストです。
-    投稿内容、発信者、投稿時間、いいね数、RT数、コメント数、インプレッション、ブックマーク数を日本語で表にしてください。
-    投稿時間は「2025年7月3日　午後11:41」のように、日付→時刻の順で出力してください。
-    例:
-    | 投稿内容 | 発信者 | 投稿時間 | いいね数 | RT数 | コメント数 | インプレッション | ブックマーク数 |
-    | 例の投稿内容 | 例の発信者 | 2025年73日　午後11:41 | 100 | 10 | 5 | 1万 | 20 |
+gc = authenticate_gspread()
+
+# --- Google Drive認証 ---
+@st.cache_resource
+def authenticate_pydrive():
+    """PyDriveを認証し、認証オブジェクトをキャッシュする"""
+    try:
+        gauth = GoogleAuth()
+        # サービスアカウント認証
+        gauth.ServiceAuth()
+        drive = GoogleDrive(gauth)
+        st.success("Google Drive認証に成功しました。")
+        return drive
+    except Exception as e:
+        st.error(f"Google Drive認証に失敗しました。認証設定を確認してください: {e}")
+        st.stop() # 認証失敗時は処理を停止
+
+drive = authenticate_pydrive()
+
+# --- Gemini API ---
+@st.cache_resource
+def configure_gemini():
+    """Gemini APIを設定し、モデルをキャッシュする"""
+    try:
+        genai.configure(api_key=GENAI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        st.success("Gemini API設定に成功しました。")
+        return model
+    except Exception as e:
+        st.error(f"Gemini APIキーの設定に失敗しました。APIキーを確認してください: {e}")
+        st.stop() # 設定失敗時は処理を停止
+
+model = configure_gemini()
+
+def upload_image_to_drive(image_path, drive_service):
     """
-    response = model.generate_content([prompt, image_data])
-    return response.text
+    画像をGoogle Driveにアップロードし、公開URLを返す。
+    """
+    try:
+        file_name = os.path.basename(image_path)
+        # ファイルを作成
+        file = drive_service.CreateFile({'title': file_name})
+        file.SetContentFile(image_path)
+        file.Upload()
+        # 誰でも閲覧できるように権限を設定
+        file.InsertPermission({'type': 'anyone', 'value': 'anyone', 'role': 'reader'})
+        st.write(f"画像 '{file_name}' をGoogle Driveにアップロードしました。")
+        return f"https://drive.google.com/uc?id={file['id']}"
+    except Exception as e:
+        st.error(f"Google Driveへの画像アップロード中にエラーが発生しました: {e}")
+        return None
+
+def extract_post_info(image_path, gemini_model):
+    """
+    Gemini APIを使用して画像から投稿情報を抽出する。
+    """
+    try:
+        image_data = Image.open(image_path)
+        prompt = """
+        この画像はX（旧Twitter）のポストです。
+        投稿内容、発信者、投稿時間、いいね数、RT数、コメント数、インプレッション、ブックマーク数を日本語で表にしてください。
+        投稿時間は「2025年7月3日　午後11:41」のように、日付→時刻の順で出力してください。
+        例:
+        | 投稿内容 | 発信者 | 投稿時間 | いいね数 | RT数 | コメント数 | インプレッション | ブックマーク数 |
+        | 例の投稿内容 | 例の発信者 | 2025年7月3日　午後11:41 | 100 | 10 | 5 | 1万 | 20 |
+        """
+        response = gemini_model.generate_content([prompt, image_data])
+        return response.text
+    except Exception as e:
+        st.error(f"Gemini APIでの情報抽出中にエラーが発生しました: {e}")
+        return None
 
 def parse_table(text):
+    """
+    Geminiからのテキスト結果をパースして辞書形式で返す。
+    """
+    if not text:
+        return None
     lines = [l for l in text.splitlines() if "|" in l]
     if len(lines) < 2:
         return None
     data_lines = []
     for l in lines:
         cells = [c.strip() for c in l.split("|")[1:-1]]
+        # Markdownの区切り行をスキップ
         if all(cell.startswith(":") or set(cell) <= set("-:") for cell in cells):
             continue
         data_lines.append(l)
@@ -97,43 +140,60 @@ def parse_table(text):
         return None
     headers_row = [h.strip() for h in data_lines[0].split("|")[1:-1]]
     values_row = [v.strip() for v in data_lines[1].split("|")[1:-1]]
+    # ヘッダーと値の数が一致しない場合はNoneを返す
+    if len(headers_row) != len(values_row):
+        st.warning("Geminiの出力形式が予期せぬものでした。")
+        return None
     return dict(zip(headers_row, values_row))
 
-def get_or_create_worksheet(spreadsheet, sheet_title, headers):
+def get_or_create_spreadsheet(gspread_client, drive_service, user_name):
+    """
+    ユーザー名に対応するスプレッドシートを取得または新規作成する。
+    """
+    spreadsheet_title = f"Xポスト自動化_{user_name}"
+    try:
+        # 既存のスプレッドシートをタイトルで検索
+        spreadsheet = gspread_client.open(spreadsheet_title)
+        st.write(f"既存のスプレッドシート '{spreadsheet_title}' を使用します。")
+        return spreadsheet
+    except SpreadsheetNotFound:
+        # スプレッドシートが存在しない場合、新規作成
+        st.write(f"スプレッドシート '{spreadsheet_title}' を新規作成します。")
+        spreadsheet = gspread_client.create(spreadsheet_title)
+        # 作成したスプレッドシートを誰でも閲覧できるように共有設定
+        spreadsheet.share('', perm_type='anyone', role='reader')
+        st.success(f"新しいスプレッドシート '{spreadsheet_title}' を作成しました。")
+        # デフォルトで作成される'Sheet1'を削除し、最初のワークシートを適切に管理
+        # gspread 5.0以降では、create時にデフォルトで1つワークシートが作成される
+        # 必要に応じて、既存の'Sheet1'を削除するロジックを追加することも可能だが、
+        # 今回は発信者ごとのタブを作成するため、そのままにしておくか、
+        # 後続のget_or_create_worksheetで最初のタブを適切に扱う。
+        return spreadsheet
+    except Exception as e:
+        st.error(f"スプレッドシートの取得または作成中にエラーが発生しました: {e}")
+        return None
+
+def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
+    """
+    指定されたスプレッドシート内で、指定されたタイトル（発信者名）のワークシートを取得または新規作成する。
+    新規作成時にはヘッダーを書き込む。
+    """
     try:
         # 既存のワークシートをタイトルで取得
         worksheet = spreadsheet.worksheet(sheet_title)
         st.write(f"既存のワークシート '{sheet_title}' を使用します。")
         return worksheet
-    except gspread.exceptions.WorksheetNotFound:
+    except WorksheetNotFound:
         # ワークシートが存在しない場合、新規作成
         st.write(f"ワークシート '{sheet_title}' を新規作成します。")
+        # add_worksheetのrows/colsは目安。必要に応じて調整。
         worksheet = spreadsheet.add_worksheet(title=sheet_title, rows="1000", cols="20")
         # ヘッダーを書き込む
-        worksheet.append_row(headers)
+        worksheet.append_row(headers_list)
         return worksheet
-
-import json
-import os
-
-def get_or_create_user_spreadsheet(gc, user, title_prefix="Xポスト一覧_"):
-    db_file = "user_sheets.json"
-    if os.path.exists(db_file):
-        with open(db_file, "r") as f:
-            user_sheets = json.load(f)
-    else:
-        user_sheets = {}
-
-    if user in user_sheets:
-        spreadsheet_id = user_sheets[user]
-        sh = gc.open_by_key(spreadsheet_id)
-    else:
-        sh = gc.create(f"{title_prefix}{user}")
-        spreadsheet_id = sh.id
-        user_sheets[user] = spreadsheet_id
-        with open(db_file, "w") as f:
-            json.dump(user_sheets, f)
-    return sh
+    except Exception as e:
+        st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
+        return None
 
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
@@ -238,6 +298,11 @@ if user_name and uploaded_file is not None:
             st.write("一時ファイル削除完了")
         else:
             st.write("一時ファイルは作成されなかったか、既に削除されています。")
+
+elif uploaded_file is not None and not user_name:
+    st.warning("画像をアップロードする前に、あなたの名前を入力してください。")
+elif user_name and uploaded_file is None:
+    st.info("画像をアップロードしてください。")
 
 elif uploaded_file is not None and not user_name:
     st.warning("画像をアップロードする前に、あなたの名前を入力してください。")
