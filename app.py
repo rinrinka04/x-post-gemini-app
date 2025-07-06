@@ -294,6 +294,10 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
         st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
         return None
 
+gc = authenticate_gspread()
+drive = authenticate_pydrive()
+model = configure_gemini()
+
 # --- Streamlit UI ---
 st.title("Xポスト画像→スプレッドシート自動化アプリ")
 st.write("画像をアップロードすると、内容を自動で抽出してあなた専用のGoogleスプレッドシートの、投稿者ごとのタブに追記します。")
