@@ -236,21 +236,21 @@ def set_worksheet_format(spreadsheet, worksheet):
             }
         })
 
-        # 3. 行2 280ピクセル
-        requests.append({
-            "updateDimensionProperties": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "dimension": "ROWS",
-                    "startIndex": 1,
-                    "endIndex": 2
-                },
-                "properties": {
-                    "pixelSize": 280
-                },
-                "fields": "pixelSize"
-            }
-        })
+# 3. 行2以降 280ピクセル
+requests.append({
+    "updateDimensionProperties": {
+        "range": {
+            "sheetId": sheet_id,
+            "dimension": "ROWS",
+            "startIndex": 1,   # 2行目（0-indexed）
+            "endIndex": 1000   # 必要に応じて十分大きな値に
+        },
+        "properties": {
+            "pixelSize": 280
+        },
+        "fields": "pixelSize"
+    }
+})
 
         # 4. 列A 280ピクセル
         requests.append({
