@@ -126,7 +126,7 @@ def upload_image_to_drive(image_path, drive_service):
 def extract_post_info(image_path, gemini_model):
     try:
         image_data = Image.open(image_path)
-        prompt = """
+prompt = """
 この画像はX（旧Twitter）のポストです。
 下記の9項目を必ず「Markdownテーブル形式（1行目:ヘッダー, 2行目:値）」で出力してください。
 - 投稿内容
@@ -143,7 +143,8 @@ def extract_post_info(image_path, gemini_model):
 | 投稿内容 | 発信者名 | アカウントID | 投稿時間 | いいね数 | RT数 | コメント数 | インプレッション | ブックマーク数 |
 | 例の投稿内容 | 田中太郎 | tanaka_taro | 2025年7月3日 午後11:41 | 100 | 10 | 5 | 1万 | 20 |
 
-もし表形式で出力できない場合は、同じ情報をJSON形式で出力してください。
+**絶対に上記のようなMarkdownテーブル形式、もしくはJSON形式でのみ出力してください。**
+**それ以外の文章や説明は一切不要です。**
 """
         response = gemini_model.generate_content([prompt, image_data])
         # <br>タグを改行に変換
