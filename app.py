@@ -271,14 +271,19 @@ def set_worksheet_format(spreadsheet, worksheet):
             }
         })
 
+def set_worksheet_format(spreadsheet, worksheet):
+    try:
+        sheet_id = worksheet._properties['sheetId']
+        requests = []
+
         # 3. 行2以降 280ピクセル
         requests.append({
             "updateDimensionProperties": {
                 "range": {
                     "sheetId": sheet_id,
                     "dimension": "ROWS",
-                    "startIndex": 1,
-                    "endIndex": 1000
+                    "startIndex": 1,   # 2行目（0-indexed）
+                    "endIndex": 1000   # 必要に応じて十分大きな値に
                 },
                 "properties": {
                     "pixelSize": 280
@@ -287,7 +292,7 @@ def set_worksheet_format(spreadsheet, worksheet):
             }
         })
 
-        # ...（他のrequests.appendもここに続く）...
+        # ...他のrequests.appendもここ...
 
         spreadsheet.batch_update({"requests": requests})
         st.success(f"ワークシート '{worksheet.title}' の初期設定を適用しました。")
