@@ -237,7 +237,7 @@ def set_worksheet_format(spreadsheet, worksheet):
         })
 
 # 3. 行2以降 280ピクセル
-requests.append({
+    requests.append({
     "updateDimensionProperties": {
         "range": {
             "sheetId": sheet_id,
