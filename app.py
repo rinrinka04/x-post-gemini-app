@@ -27,7 +27,7 @@ if not st.session_state["authenticated"]:
         st.stop()
 
 # --- 設定 ---
-GENAI_API_KEY = "YOUR_GEMINI_API_KEY"  # ←ご自身のAPIキーに変更
+GENAI_API_KEY = "AIzaSyCc2MQQ2ytt32gzMq53L_Z8SKhWWMRjJ1s"  # ←ご自身のAPIキーに変更
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive'
@@ -368,7 +368,7 @@ if email and uploaded_file is not None:
                     os.remove(tmp_path)
                 st.stop()
 
-            tab_name = f"{author_name}（@{account_id}）" if account_id else author_name
+            tab_name = f"{author_name}（{account_id}）" if account_id else author_name
 
             target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
             if target_worksheet is None:
