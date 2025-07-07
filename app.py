@@ -27,7 +27,7 @@ if not st.session_state["authenticated"]:
         st.stop()
 
 # --- 設定 ---
-GENAI_API_KEY = "AIzaSyCc2MQQ2ytt32gzMq53L_Z8SKhWWMRjJ1s"
+GENAI_API_KEY = "YOUR_GEMINI_API_KEY"  # ←ご自身のAPIキーに変更
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive'
@@ -136,7 +136,9 @@ def extract_post_info(image_path, gemini_model):
         | 例の投稿内容 | なまいきくん | 1namaiki | 2025年7月3日 午後11:41 | 100 | 10 | 5 | 1万 | 20 |
         """
         response = gemini_model.generate_content([prompt, image_data])
-        return response.text
+        # <br>タグを改行に変換
+        cleaned_text = response.text.replace('<br>', '\n').replace('<BR>', '\n').replace('<br/>', '\n').replace('<BR/>', '\n')
+        return cleaned_text
     except Exception as e:
         st.error(f"Gemini APIでの情報抽出中にエラーが発生しました: {e}")
         return None
@@ -182,6 +184,123 @@ def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
             st.warning(f"スプレッドシートの共有設定中にエラーが発生しました。手動で共有設定を行ってください: {share_e}")
     return spreadsheet
 
+def set_worksheet_format(spreadsheet, worksheet):
+    """ワークシートの初期設定を一括で適用"""
+    try:
+        sheet_id = worksheet._properties['sheetId']
+        requests = []
+
+        # 1. 1行固定
+        requests.append({
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {
+                        "frozenRowCount": 1
+                    }
+                },
+                "fields": "gridProperties.frozenRowCount"
+            }
+        })
+
+        # 2. 全て文字は中央揃え（垂直方向、水平方向両方とも）
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE"
+                    }
+                },
+                "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment"
+            }
+        })
+
+        # 3. 行2 280ピクセル
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": 1,
+                    "endIndex": 2
+                },
+                "properties": {
+                    "pixelSize": 280
+                },
+                "fields": "pixelSize"
+            }
+        })
+
+        # 4. 列A 280ピクセル
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 0,
+                    "endIndex": 1
+                },
+                "properties": {
+                    "pixelSize": 280
+                },
+                "fields": "pixelSize"
+            }
+        })
+
+        # 5. 列B テキストを折り返す
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startColumnIndex": 1,
+                    "endColumnIndex": 2
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "wrapStrategy": "WRAP"
+                    }
+                },
+                "fields": "userEnteredFormat.wrapStrategy"
+            }
+        })
+
+        # 6. 列K〜T削除 (0-indexed: K=10, T=19)
+        requests.append({
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 10,
+                    "endIndex": 20
+                }
+            }
+        })
+
+        # 7. 列C〜Jの幅は100ピクセル (0-indexed: C=2, J=9)
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": 2,
+                    "endIndex": 10
+                },
+                "properties": {
+                    "pixelSize": 100
+                },
+                "fields": "pixelSize"
+            }
+        })
+
+        spreadsheet.batch_update({"requests": requests})
+        st.success(f"ワークシート '{worksheet.title}' の初期設定を適用しました。")
+    except Exception as e:
+        st.warning(f"ワークシート '{worksheet.title}' の初期設定適用中にエラーが発生しました: {e}")
+
 def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
     try:
         worksheet = spreadsheet.worksheet(sheet_title)
@@ -189,6 +308,7 @@ def get_or_create_worksheet(spreadsheet, sheet_title, headers_list):
     except WorksheetNotFound:
         worksheet = spreadsheet.add_worksheet(title=sheet_title, rows="1000", cols="20")
         worksheet.append_row(headers_list)
+        set_worksheet_format(spreadsheet, worksheet)
         return worksheet
     except Exception as e:
         st.error(f"ワークシートの取得または作成中にエラーが発生しました: {e}")
@@ -257,7 +377,10 @@ if email and uploaded_file is not None:
                     os.remove(tmp_path)
                 st.stop()
 
-            row_data = [image_formula, info.get("投稿内容", ""), info.get("発信者名", ""), info.get("アカウントID", ""),
+            # 投稿内容の改行もきちんと反映
+            post_content = info.get("投稿内容", "").replace('<br>', '\n').replace('<BR>', '\n').replace('<br/>', '\n').replace('<BR/>', '\n')
+
+            row_data = [image_formula, post_content, info.get("発信者名", ""), info.get("アカウントID", ""),
                         info.get("投稿時間", ""), info.get("いいね数", ""), info.get("RT数", ""),
                         info.get("コメント数", ""), info.get("インプレッション", ""), info.get("ブックマーク数", "")]
             try:
