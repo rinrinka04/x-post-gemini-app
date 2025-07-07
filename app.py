@@ -162,25 +162,31 @@ def parse_table(text):
         data = json.loads(text)
         if isinstance(data, dict):
             return data
+        if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+            return data[0]
     except Exception:
         pass
-    # 以降はテーブルパース
+    # テーブルパース
     lines = [l for l in text.splitlines() if "|" in l]
     if len(lines) < 2:
         return None
+    # 区切り線（|---|---|）を除外
     data_lines = []
     for l in lines:
         cells = [c.strip() for c in l.split("|")[1:-1]]
-        if all(cell.startswith(":") or set(cell) <= set("-:") for cell in cells):
+        if all(set(cell) <= set("-:") for cell in cells):
             continue
         data_lines.append(l)
     if len(data_lines) < 2:
         return None
     headers_row = [h.strip() for h in data_lines[0].split("|")[1:-1]]
-    values_row = [v.strip() for v in data_lines[1].split("|")[1:-1]]
-    if len(headers_row) != len(values_row):
-        st.warning("Geminiの出力形式が予期せぬものでした。")
-        return None
+    # 2行目以降で値行を探す
+    for values_line in data_lines[1:]:
+        values_row = [v.strip() for v in values_line.split("|")[1:-1]]
+        if len(headers_row) == len(values_row):
+            return dict(zip(headers_row, values_row))
+    st.warning("Geminiの出力形式が予期せぬものでした。")
+    return None
     return dict(zip(headers_row, values_row))
 
 def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
