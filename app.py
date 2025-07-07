@@ -446,6 +446,3 @@ elif uploaded_files and not email:
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
 elif email and not uploaded_files:
     st.info("画像をアップロードしてください。")
-```
-
----
