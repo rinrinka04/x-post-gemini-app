@@ -389,14 +389,12 @@ if email and uploaded_files:
             image_formula = f'=IMAGE("{image_url}", 2)'
 
             result_text = extract_post_info(tmp_path, model)
-            # --- Geminiの生出力を必ず表示（デバッグ用） ---
-            st.text_area(f"Geminiの生出力 ({i+1}枚目)", result_text or "None", height=200)
 
-            if result_text is None:
-                errors.append(f"{i+1}枚目: Geminiでの情報抽出に失敗しました。")
-                if tmp_path and os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-                continue
+if result_text is None:
+    errors.append(f"{i+1}枚目: Geminiでの情報抽出に失敗しました。")
+    if tmp_path and os.path.exists(tmp_path):
+        os.remove(tmp_path)
+    continue
 
             info = parse_table(result_text)
 
