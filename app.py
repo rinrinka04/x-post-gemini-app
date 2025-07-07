@@ -403,7 +403,7 @@ if email and uploaded_files:
                         os.remove(tmp_path)
                     continue
 
-                tab_name = f"{author_name}（{account_id}）"
+                tab_name = f"{author_name}"
 
                 target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
                 if target_worksheet is None:
