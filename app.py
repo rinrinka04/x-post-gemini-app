@@ -127,14 +127,24 @@ def extract_post_info(image_path, gemini_model):
     try:
         image_data = Image.open(image_path)
         prompt = """
-        この画像はX（旧Twitter）のポストです。
-        投稿内容、発信者名、アカウントID、投稿時間、いいね数、RT数、コメント数、インプレッション、ブックマーク数を日本語で表にしてください。
-        発信者名とアカウントIDは必ず分けて出力してください。
-        投稿時間は「2025年7月3日　午後11:41」のように、日付→時刻の順で出力してください。
-        例:
-        | 投稿内容 | 発信者名 | アカウントID | 投稿時間 | いいね数 | RT数 | コメント数 | インプレッション | ブックマーク数 |
-        | 例の投稿内容 | なまいきくん | 1namaiki | 2025年7月3日 午後11:41 | 100 | 10 | 5 | 1万 | 20 |
-        """
+この画像はX（旧Twitter）のポストです。
+下記の9項目を必ず「Markdownテーブル形式（1行目:ヘッダー, 2行目:値）」で出力してください。
+- 投稿内容
+- 発信者名
+- アカウントID
+- 投稿時間
+- いいね数
+- RT数
+- コメント数
+- インプレッション
+- ブックマーク数
+
+【出力例】
+| 投稿内容 | 発信者名 | アカウントID | 投稿時間 | いいね数 | RT数 | コメント数 | インプレッション | ブックマーク数 |
+| 例の投稿内容 | なまいきくん | 1namaiki | 2025年7月3日 午後11:41 | 100 | 10 | 5 | 1万 | 20 |
+
+もし表形式で出力できない場合は、同じ情報をJSON形式で出力してください。
+"""
         response = gemini_model.generate_content([prompt, image_data])
         # <br>タグを改行に変換
         cleaned_text = response.text.replace('<br>', '\n').replace('<BR>', '\n').replace('<br/>', '\n').replace('<BR/>', '\n')
@@ -146,6 +156,14 @@ def extract_post_info(image_path, gemini_model):
 def parse_table(text):
     if not text:
         return None
+    # まずJSON形式で返ってきた場合に対応
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    # 以降はテーブルパース
     lines = [l for l in text.splitlines() if "|" in l]
     if len(lines) < 2:
         return None
@@ -185,7 +203,6 @@ def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
     return spreadsheet
 
 def set_worksheet_format(spreadsheet, worksheet):
-    """ワークシートの初期設定を一括で適用"""
     try:
         sheet_id = worksheet._properties['sheetId']
         requests = []
@@ -368,7 +385,7 @@ if email and uploaded_file is not None:
                     os.remove(tmp_path)
                 st.stop()
 
-            tab_name = f"{author_name}（{account_id}）" if account_id else author_name
+            tab_name = f"{author_name}（@{account_id}）" if account_id else author_name
 
             target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
             if target_worksheet is None:
