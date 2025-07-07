@@ -236,46 +236,6 @@ def set_worksheet_format(spreadsheet, worksheet):
             }
         })
 
-# 3. 行2以降 280ピクセル
-def set_worksheet_format(spreadsheet, worksheet):
-    try:
-        sheet_id = worksheet._properties['sheetId']
-        requests = []
-
-        # 1. 1行固定
-        requests.append({
-            "updateSheetProperties": {
-                "properties": {
-                    "sheetId": sheet_id,
-                    "gridProperties": {
-                        "frozenRowCount": 1
-                    }
-                },
-                "fields": "gridProperties.frozenRowCount"
-            }
-        })
-
-        # 2. 全て文字は中央揃え
-        requests.append({
-            "repeatCell": {
-                "range": {
-                    "sheetId": sheet_id
-                },
-                "cell": {
-                    "userEnteredFormat": {
-                        "horizontalAlignment": "CENTER",
-                        "verticalAlignment": "MIDDLE"
-                    }
-                },
-                "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment"
-            }
-        })
-
-def set_worksheet_format(spreadsheet, worksheet):
-    try:
-        sheet_id = worksheet._properties['sheetId']
-        requests = []
-
         # 3. 行2以降 280ピクセル
         requests.append({
             "updateDimensionProperties": {
