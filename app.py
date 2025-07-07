@@ -126,7 +126,7 @@ def upload_image_to_drive(image_path, drive_service):
 def extract_post_info(image_path, gemini_model):
     try:
         image_data = Image.open(image_path)
-prompt = """
+        prompt = """
 この画像はX（旧Twitter）のポストです。
 下記の9項目を必ず「Markdownテーブル形式（1行目:ヘッダー, 2行目:値）」で出力してください。
 - 投稿内容
