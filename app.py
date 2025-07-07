@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import os
 import tempfile
@@ -27,7 +28,7 @@ if not st.session_state["authenticated"]:
         st.stop()
 
 # --- 設定 ---
-GENAI_API_KEY = "AIzaSyCc2MQQ2ytt32gzMq53L_Z8SKhWWMRjJ1s"  # ←ご自身のAPIキーに変更
+GENAI_API_KEY = "AIzaSyCc2MQQ2ytt32gzMq53L_Z8SKhWWMRjJ1s"  # 必ずご自身のAPIキーに変更
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive'
@@ -147,7 +148,6 @@ def extract_post_info(image_path, gemini_model):
 **それ以外の文章や説明は一切不要です。**
 """
         response = gemini_model.generate_content([prompt, image_data])
-        # <br>タグを改行に変換
         cleaned_text = response.text.replace('<br>', '\n').replace('<BR>', '\n').replace('<br/>', '\n').replace('<BR/>', '\n')
         return cleaned_text
     except Exception as e:
@@ -157,7 +157,7 @@ def extract_post_info(image_path, gemini_model):
 def parse_table(text):
     if not text:
         return None
-    # まずJSON形式で返ってきた場合に対応
+    # JSON形式で返ってきた場合に対応
     try:
         data = json.loads(text)
         if isinstance(data, dict):
@@ -185,9 +185,7 @@ def parse_table(text):
         values_row = [v.strip() for v in values_line.split("|")[1:-1]]
         if len(headers_row) == len(values_row):
             return dict(zip(headers_row, values_row))
-    st.warning("Geminiの出力形式が予期せぬものでした。")
     return None
-    return dict(zip(headers_row, values_row))
 
 def get_or_create_spreadsheet(gspread_client, drive_service, user_email):
     spreadsheet_title = f"Xポスト自動化_{user_email}"
@@ -249,8 +247,8 @@ def set_worksheet_format(spreadsheet, worksheet):
                 "range": {
                     "sheetId": sheet_id,
                     "dimension": "ROWS",
-                    "startIndex": 1,   # 2行目（0-indexed）
-                    "endIndex": 1000   # 必要に応じて十分大きな値に
+                    "startIndex": 1,
+                    "endIndex": 1000
                 },
                 "properties": {
                     "pixelSize": 280
@@ -392,6 +390,9 @@ if email and uploaded_files:
             image_formula = f'=IMAGE("{image_url}", 2)'
 
             result_text = extract_post_info(tmp_path, model)
+            # --- Geminiの生出力を必ず表示（デバッグ用） ---
+            st.text_area(f"Geminiの生出力 ({i+1}枚目)", result_text or "None", height=200)
+
             if result_text is None:
                 errors.append(f"{i+1}枚目: Geminiでの情報抽出に失敗しました。")
                 if tmp_path and os.path.exists(tmp_path):
@@ -446,3 +447,6 @@ elif uploaded_files and not email:
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
 elif email and not uploaded_files:
     st.info("画像をアップロードしてください。")
+```
+
+---
