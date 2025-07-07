@@ -368,7 +368,7 @@ if email and uploaded_files:
                 tmp_file.write(uploaded_file.read())
                 tmp_path = tmp_file.name
 
-            st.image(tmp_path, caption=f"アップロード画像 {i+1}", use_column_width=True)
+            st.image(tmp_path, caption=f"アップロード画像 {i+1}", use_container_width=True)
             st.info(f"画像を解析中... ({i+1}/{total_files}枚目)")
 
             user_spreadsheet = get_or_create_spreadsheet(gc, drive, email)
