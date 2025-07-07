@@ -358,29 +358,26 @@ uploaded_files = st.file_uploader(
 
 if email and uploaded_files:
     total_files = min(len(uploaded_files), 30)
-    progress_bar = st.progress(0, text="画像を処理中...")
-
+    errors = []
+    user_spreadsheet = None
     for i, uploaded_file in enumerate(uploaded_files[:30]):
         tmp_path = None
         try:
-            progress_bar.progress((i + 1) / total_files, text=f"画像を処理中: {i+1}/{total_files}枚目")
             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_path = tmp_file.name
 
-            st.image(tmp_path, caption=f"アップロード画像 {i+1}", use_container_width=True)
-            st.info(f"画像を解析中... ({i+1}/{total_files}枚目)")
-
-            user_spreadsheet = get_or_create_spreadsheet(gc, drive, email)
             if user_spreadsheet is None:
-                st.error("スプレッドシートの準備に失敗しました。")
+                user_spreadsheet = get_or_create_spreadsheet(gc, drive, email)
+            if user_spreadsheet is None:
+                errors.append(f"{i+1}枚目: スプレッドシートの準備に失敗しました。")
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
                 continue
 
             image_url = upload_image_to_drive(tmp_path, drive)
             if image_url is None:
-                st.error("Google Driveへの画像アップロードに失敗しました。")
+                errors.append(f"{i+1}枚目: Google Driveへの画像アップロードに失敗しました。")
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
                 continue
@@ -389,12 +386,10 @@ if email and uploaded_files:
 
             result_text = extract_post_info(tmp_path, model)
             if result_text is None:
-                st.error("Geminiでの情報抽出に失敗しました。")
+                errors.append(f"{i+1}枚目: Geminiでの情報抽出に失敗しました。")
                 if tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
                 continue
-
-            st.text_area(f"Gemini抽出結果 ({i+1}/{total_files}枚目)", result_text, height=200)
 
             info = parse_table(result_text)
 
@@ -403,22 +398,20 @@ if email and uploaded_files:
                 account_id = info.get("アカウントID")
 
                 if not author_name or not account_id:
-                    st.error("発信者名またはアカウントID情報を抽出できませんでした。Geminiの出力形式を確認してください。")
+                    errors.append(f"{i+1}枚目: 発信者名またはアカウントID情報を抽出できませんでした。Geminiの出力形式を確認してください。")
                     if tmp_path and os.path.exists(tmp_path):
                         os.remove(tmp_path)
                     continue
 
-                # タブ名を「アカウント名（ID）」形式に
                 tab_name = f"{author_name}（{account_id}）"
 
                 target_worksheet = get_or_create_worksheet(user_spreadsheet, tab_name, headers)
                 if target_worksheet is None:
-                    st.error("ワークシートの準備に失敗しました。")
+                    errors.append(f"{i+1}枚目: ワークシートの準備に失敗しました。")
                     if tmp_path and os.path.exists(tmp_path):
                         os.remove(tmp_path)
                     continue
 
-                # 投稿内容の改行もきちんと反映
                 post_content = info.get("投稿内容", "").replace('<br>', '\n').replace('<BR>', '\n').replace('<br/>', '\n').replace('<BR/>', '\n')
 
                 row_data = [image_formula, post_content, info.get("発信者名", ""), info.get("アカウントID", ""),
@@ -426,20 +419,21 @@ if email and uploaded_files:
                             info.get("コメント数", ""), info.get("インプレッション", ""), info.get("ブックマーク数", "")]
                 try:
                     target_worksheet.append_row(row_data, value_input_option='USER_ENTERED')
-                    st.success(f"スプレッドシート '{user_spreadsheet.title}' の '{tab_name}' タブに追記しました！")
-                    st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
                 except Exception as e:
-                    st.error(f"スプレッドシートへの追記中にエラーが発生しました: {e}")
+                    errors.append(f"{i+1}枚目: スプレッドシートへの追記中にエラーが発生しました: {e}")
             else:
-                st.error("情報の抽出に失敗しました。Geminiの出力形式を確認してください。")
+                errors.append(f"{i+1}枚目: 情報の抽出に失敗しました。Geminiの出力形式を確認してください。")
 
         except Exception as e:
-            st.error(f"予期せぬエラーが発生しました: {e}")
+            errors.append(f"{i+1}枚目: 予期せぬエラーが発生しました: {e}")
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-    progress_bar.empty()
+    if user_spreadsheet:
+        st.markdown(f"[スプレッドシートを開く]({user_spreadsheet.url})")
+    if errors:
+        st.warning("\\n".join(errors))
 
 elif uploaded_files and not email:
     st.warning("画像をアップロードする前に、あなたのGoogleメールアドレスを入力してください。")
