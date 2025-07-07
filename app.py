@@ -237,20 +237,62 @@ def set_worksheet_format(spreadsheet, worksheet):
         })
 
 # 3. 行2以降 280ピクセル
-    requests.append({
-    "updateDimensionProperties": {
-        "range": {
-            "sheetId": sheet_id,
-            "dimension": "ROWS",
-            "startIndex": 1,   # 2行目（0-indexed）
-            "endIndex": 1000   # 必要に応じて十分大きな値に
-        },
-        "properties": {
-            "pixelSize": 280
-        },
-        "fields": "pixelSize"
-    }
-})
+def set_worksheet_format(spreadsheet, worksheet):
+    try:
+        sheet_id = worksheet._properties['sheetId']
+        requests = []
+
+        # 1. 1行固定
+        requests.append({
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {
+                        "frozenRowCount": 1
+                    }
+                },
+                "fields": "gridProperties.frozenRowCount"
+            }
+        })
+
+        # 2. 全て文字は中央揃え
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE"
+                    }
+                },
+                "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment"
+            }
+        })
+
+        # 3. 行2以降 280ピクセル
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": 1,
+                    "endIndex": 1000
+                },
+                "properties": {
+                    "pixelSize": 280
+                },
+                "fields": "pixelSize"
+            }
+        })
+
+        # ...（他のrequests.appendもここに続く）...
+
+        spreadsheet.batch_update({"requests": requests})
+        st.success(f"ワークシート '{worksheet.title}' の初期設定を適用しました。")
+    except Exception as e:
+        st.warning(f"ワークシート '{worksheet.title}' の初期設定適用中にエラーが発生しました: {e}")
 
         # 4. 列A 280ピクセル
         requests.append({
