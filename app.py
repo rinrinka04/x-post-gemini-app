@@ -388,7 +388,7 @@ if email and uploaded_files:
 
             image_formula = f'=IMAGE("{image_url}", 2)'
 
-            result_text = extract_post_info(tmp_path, model)
+result_text = extract_post_info(tmp_path, model)
 
 if result_text is None:
     errors.append(f"{i+1}枚目: Geminiでの情報抽出に失敗しました。")
