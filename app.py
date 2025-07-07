@@ -252,13 +252,6 @@ def set_worksheet_format(spreadsheet, worksheet):
             }
         })
 
-        # ...他のrequests.appendもここ...
-
-        spreadsheet.batch_update({"requests": requests})
-        st.success(f"ワークシート '{worksheet.title}' の初期設定を適用しました。")
-    except Exception as e:
-        st.warning(f"ワークシート '{worksheet.title}' の初期設定適用中にエラーが発生しました: {e}")
-
         # 4. 列A 280ピクセル
         requests.append({
             "updateDimensionProperties": {
